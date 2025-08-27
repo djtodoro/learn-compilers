@@ -49,6 +49,58 @@ A Practical Course for AI/ML Engineers}
 \tableofcontents
 \newpage
 
+\section{Preface: Who This Course Is For and Why Compilers Matter}
+
+\subsection{Prerequisites and Intended Audience}
+
+This course is designed for engineers and developers who want to understand the fundamental concepts of compiler design through hands-on experience with xDSL. To get the most out of this material, you should have:
+
+\begin{itemize}
+    \item \textbf{Python Proficiency}: Strong knowledge of Python is essential, as xDSL is a Python-native framework. You should be comfortable with classes, decorators, type hints, and the Python standard library.
+    \item \textbf{Basic Programming Knowledge}: Understanding of fundamental programming concepts like functions, variables, control flow, data structures, and algorithms is required.
+    \item \textbf{Machine Learning and AI Basics}: Familiarity with ML/AI concepts is crucial - you should understand tensors, neural networks, computational graphs, and optimization techniques. Experience with frameworks like PyTorch or TensorFlow will help you appreciate the compiler optimizations we'll explore.
+    \item \textbf{Mathematical Foundations}: Basic understanding of linear algebra and discrete mathematics will be helpful, especially when working with optimization algorithms and graph transformations.
+\end{itemize}
+
+If you're an ML engineer curious about what happens "under the hood" when your models are compiled and optimized, or a systems programmer interested in building efficient code transformation tools, this course will bridge that gap using familiar Python syntax.
+
+\subsection{Compilers: The Invisible Revolution That Changed Computing}
+
+Compilers are perhaps the most transformative technology in the history of computing, yet they work so seamlessly that we rarely think about them. To understand their revolutionary impact, consider this: the Linux kernel, which powers billions of devices worldwide, was initially written in assembly language - a tedious, error-prone process where programmers had to think in terms of individual CPU instructions and memory addresses. Each line of assembly code corresponded directly to a machine instruction, making even simple tasks require hundreds of lines of code.
+
+Then came the evolution of the C compiler. As compilers matured, they could translate high-level C code into assembly with equal or sometimes even better performance than hand-written assembly. This transformation was revolutionary - Linux could be rewritten in C, making it portable across different architectures, easier to maintain, and accessible to a broader community of developers. What once required intimate knowledge of specific CPU architectures could now be expressed in readable, maintainable code. The compiler handled the complex translation, optimization, and architecture-specific details automatically.
+
+This same revolution continues today in machine learning. Just as C compilers freed developers from assembly, ML compilers like XLA, TVM, and MLIR free ML engineers from writing architecture-specific kernels. Your PyTorch model can run efficiently on CPUs, GPUs, TPUs, or custom accelerators, all thanks to sophisticated compiler technology working behind the scenes.
+
+\subsection{The Core Mission: Represent and Transform}
+
+At its heart, a compiler's job is elegantly simple yet profoundly powerful: to \textbf{represent} programs in structured forms and to \textbf{transform} these representations to achieve specific goals. Think of a compiler as a sophisticated translator that not only converts between languages but also understands the meaning of what it's translating deeply enough to improve it along the way.
+
+This representation and transformation paradigm involves:
+\begin{itemize}
+    \item \textbf{Representation}: Converting source code into structured data (Abstract Syntax Trees, Intermediate Representations, Control Flow Graphs) that capture the program's semantics precisely
+    \item \textbf{Analysis}: Understanding data dependencies, control flow, memory access patterns, and optimization opportunities within these representations
+    \item \textbf{Transformation}: Systematically modifying these representations to optimize performance, reduce resource usage, or target specific hardware architectures
+    \item \textbf{Preservation}: Ensuring that transformations maintain the original program's correctness and semantics
+\end{itemize}
+
+\subsection{The Power of Serialize, Deserialize, and Verify}
+
+A crucial but often overlooked aspect of compiler infrastructure is the ability to serialize, deserialize, and verify intermediate representations. This capability fundamentally changes how we can work with compilers and is a cornerstone of modern compiler design.
+
+\textbf{Why These Capabilities Matter:}
+\begin{itemize}
+    \item \textbf{Serialization} allows us to save the compiler's intermediate state to disk, enabling separate compilation, caching of optimization results, and distribution of compiled modules. You can pause compilation, save the IR, and resume later - or on a different machine entirely.
+    \item \textbf{Deserialization} lets us load previously compiled modules, compose them together, and build large systems incrementally. This is essential for modular compilation and linking.
+    \item \textbf{Verification} ensures that the IR is well-formed and obeys the type system and semantic rules. This catches errors early, enables safe transformations, and provides guarantees about program behavior. Without verification, compiler bugs could silently corrupt programs.
+\end{itemize}
+
+The xDSL infrastructure we're about to explore has these capabilities built into its core. Every operation, every transformation, and every intermediate state can be serialized to a human-readable textual format, loaded back, and verified for correctness. This isn't just a convenience feature - it's fundamental to building robust, composable compiler pipelines. You can inspect the IR at any stage, debug transformations by examining the before-and-after states, and even hand-write IR for testing.
+
+This approach contrasts sharply with traditional compilers where the intermediate states are often opaque binary structures locked inside the compiler's memory. With xDSL (inspired by MLIR), the entire compilation pipeline becomes transparent, debuggable, and extensible. You can serialize the IR after each optimization pass, analyze what changed, and even replay specific transformations. This visibility and control make compiler development more like software engineering and less like black magic.
+
+As you progress through this course, you'll come to appreciate how these fundamental capabilities - serialize, deserialize, and verify - enable you to build reliable, maintainable, and powerful compilation tools. They transform the compiler from a monolithic black box into a modular, inspectable, and trustworthy system.
+
 \section{Introduction: Compilers as Representation and Transformation Engines}
 
 \subsection{Welcome to the World of Compilers}
