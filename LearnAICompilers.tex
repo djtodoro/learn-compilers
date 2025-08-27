@@ -1,0 +1,1371 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{tikz}
+\usepackage{geometry}
+\geometry{margin=1in}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{pythonstyle}{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\small,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2
+}
+
+\lstset{style=pythonstyle}
+
+\title{Learn Compiler Design Through xDSL:\\
+A Practical Course for AI/ML Engineers}
+\author{Djordje Todorovic}
+\date{August 2025}
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+\newpage
+
+\section{Introduction: Compilers as Representation and Transformation Engines}
+
+\subsection{Welcome to the World of Compilers}
+
+If you're coming from an AI/ML background, you already understand the power of transforming data through layers of abstraction. Compilers are remarkably similar: they take programs written in one representation and systematically transform them into another, more optimized or more executable form.
+
+Think of a compiler as a sophisticated pipeline that:
+\begin{enumerate}
+    \item \textbf{Represents} programs as structured data (Abstract Syntax Trees, Intermediate Representations)
+    \item \textbf{Transforms} these representations through a series of optimization passes
+    \item \textbf{Analyzes} code to understand dependencies, patterns, and optimization opportunities
+    \item \textbf{Generates} efficient target code for specific hardware
+\end{enumerate}
+
+\subsection{Why xDSL?}
+
+xDSL is a Python-native compiler framework that makes compiler concepts accessible to Python programmers. Unlike traditional compiler frameworks written in C++ (like LLVM), xDSL allows you to:
+\begin{itemize}
+    \item Build compilers using familiar Python syntax
+    \item Prototype and experiment quickly
+    \item Understand compiler internals without low-level complexity
+    \item Leverage the entire Python ecosystem for analysis and visualization
+\end{itemize}
+
+\subsection{Course Philosophy: Learn by Building}
+
+This course takes a hands-on approach. Instead of starting with theory, we'll build small compilers and optimization passes from day one. Each concept will be introduced through practical examples that you can run, modify, and experiment with.
+
+\subsection{What You'll Learn}
+
+By the end of this course, you'll understand:
+\begin{itemize}
+    \item How compilers represent programs internally (IR - Intermediate Representations)
+    \item What operations and operators mean in a compiler context
+    \item How to write analysis passes that extract information from code
+    \item How to implement transformations that optimize programs
+    \item The connection between compiler optimizations and ML model optimization
+\end{itemize}
+
+\section{Chapter 1: Understanding Intermediate Representations (IR)}
+
+\subsection{What is an IR?}
+
+An Intermediate Representation (IR) is the compiler's internal language for representing programs. Just as neural networks use tensors to represent data, compilers use IRs to represent code structure and semantics.
+
+Key properties of IRs:
+\begin{itemize}
+    \item \textbf{Abstract}: Higher-level than machine code, but more structured than source code
+    \item \textbf{Explicit}: Makes implicit operations visible (e.g., memory allocations, type conversions)
+    \item \textbf{Analyzable}: Designed for easy pattern matching and transformation
+    \item \textbf{Hierarchical}: Can represent nested structures (functions, loops, blocks)
+\end{itemize}
+
+\subsection{The Compiler Pipeline: From Source to Machine Code}
+
+Before diving into xDSL specifics, let's understand how compilers work. A compiler is traditionally divided into three main phases, each with specific responsibilities:
+
+\subsubsection{Frontend: Understanding Your Code}
+
+The frontend translates source code into an intermediate representation. It consists of:
+
+\textbf{1. Lexical Analysis (Lexer/Tokenizer)}
+\begin{itemize}
+    \item Breaks source code into tokens (keywords, identifiers, operators)
+    \item Like splitting a sentence into words
+    \item Example: \texttt{"x = 42 + y"} becomes tokens: [\texttt{ID:x}, \texttt{ASSIGN}, \texttt{NUM:42}, \texttt{PLUS}, \texttt{ID:y}]
+\end{itemize}
+
+\textbf{2. Syntax Analysis (Parser)}
+\begin{itemize}
+    \item Builds an Abstract Syntax Tree (AST) from tokens
+    \item Checks grammatical structure
+    \item Like diagramming a sentence to understand its structure
+\end{itemize}
+
+\begin{lstlisting}[language=Python, caption=Simple AST Example]
+# Source: x = 42 + y
+# AST representation:
+Assignment(
+    left=Variable("x"),
+    right=BinaryOp(
+        op="+",
+        left=Number(42),
+        right=Variable("y")
+    )
+)
+\end{lstlisting}
+
+\textbf{3. Semantic Analysis}
+\begin{itemize}
+    \item Type checking: Is this operation valid?
+    \item Symbol resolution: What does this variable refer to?
+    \item Example: Can't add a string to a number, variables must be declared
+\end{itemize}
+
+\subsubsection{Middle-end: Optimization Central}
+
+The middle-end works on the IR to optimize code:
+\begin{itemize}
+    \item \textbf{Platform-independent}: Optimizations work for any target
+    \item \textbf{Examples}: Dead code elimination, constant folding, loop optimization
+    \item \textbf{Multiple passes}: Each optimization is a separate pass over the IR
+\end{itemize}
+
+\subsubsection{Backend: Generating Machine Code}
+
+The backend translates optimized IR to target-specific code:
+\begin{itemize}
+    \item \textbf{Instruction selection}: Choose machine instructions
+    \item \textbf{Register allocation}: Assign variables to CPU registers
+    \item \textbf{Instruction scheduling}: Order operations for performance
+\end{itemize}
+
+\subsection{Learning from Giants: LLVM and MLIR}
+
+\subsubsection{LLVM: The Industry Standard}
+
+LLVM (Low Level Virtual Machine) is the most widely used compiler infrastructure:
+\begin{itemize}
+    \item Powers Clang (C/C++), Swift, Rust, and many other languages
+    \item Provides a well-defined IR (LLVM IR) that many frontends target
+    \item Excellent tutorial: \href{https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/index.html}{Kaleidoscope Tutorial}
+    \item Shows how to build a complete compiler for a simple language
+\end{itemize}
+
+\begin{lstlisting}[language=C, caption=LLVM IR Example]
+; LLVM IR for: int add(int a, int b) { return a + b; }
+define i32 @add(i32 %a, i32 %b) {
+entry:
+  %sum = add i32 %a, %b
+  ret i32 %sum
+}
+\end{lstlisting}
+
+\subsubsection{MLIR: Multi-Level IR}
+
+MLIR (Multi-Level Intermediate Representation) extends LLVM's concepts:
+\begin{itemize}
+    \item Developed by Google, now part of LLVM project
+    \item Supports multiple IRs (dialects) in the same infrastructure
+    \item Used by TensorFlow, PyTorch, and other ML frameworks
+    \item Tutorial: \href{https://mlir.llvm.org/docs/Tutorials/Toy/}{Toy Language Tutorial}
+    \item xDSL is heavily inspired by MLIR but implemented in Python
+\end{itemize}
+
+\begin{lstlisting}[caption=MLIR Example - Multiple Abstraction Levels]
+// High-level ML operation
+%result = "tf.MatMul"(%a, %b) : (tensor<2x3xf32>, tensor<3x4xf32>) 
+                                -> tensor<2x4xf32>
+
+// After lowering to linalg dialect
+%result = linalg.matmul ins(%a, %b : memref<2x3xf32>, memref<3x4xf32>)
+                       outs(%c : memref<2x4xf32>)
+
+// After lowering to loops
+scf.for %i = 0 to 2 {
+  scf.for %j = 0 to 4 {
+    scf.for %k = 0 to 3 {
+      // actual computation
+    }
+  }
+}
+\end{lstlisting}
+
+\subsection{Why xDSL Uses IR Instead of AST}
+
+While traditional compilers start with AST, xDSL (like MLIR) works directly with IR because:
+\begin{itemize}
+    \item \textbf{Uniformity}: All transformations work on the same structure
+    \item \textbf{Composability}: Easy to combine different languages/dialects
+    \item \textbf{Reusability}: Optimizations work across different source languages
+    \item \textbf{Analysis-friendly}: SSA form makes many analyses trivial
+\end{itemize}
+
+Think of it this way:
+\begin{itemize}
+    \item \textbf{AST}: Like a sentence diagram - shows structure
+    \item \textbf{IR}: Like assembly with types - shows computation
+\end{itemize}
+
+\subsection{SSA Form: Single Static Assignment}
+
+xDSL uses SSA (Single Static Assignment) form, where each variable is assigned exactly once. This is similar to functional programming and makes many analyses simpler.
+
+\begin{lstlisting}[language=Python, caption=Traditional vs SSA Form]
+# Traditional form
+x = 5
+x = x + 1
+y = x * 2
+
+# SSA form (conceptual)
+x_0 = 5
+x_1 = x_0 + 1
+y_0 = x_1 * 2
+\end{lstlisting}
+
+Why SSA matters:
+\begin{itemize}
+    \item \textbf{No ambiguity}: Each value has exactly one definition
+    \item \textbf{Easy analysis}: Use-def chains are explicit
+    \item \textbf{Better optimization}: Many optimizations become simpler
+    \item \textbf{Parallel-friendly}: Dependencies are clear
+\end{itemize}
+
+\subsection{Your First xDSL Program}
+
+Let's create a simple IR program using xDSL:
+
+\begin{lstlisting}[language=Python, caption=Creating IR in xDSL]
+from xdsl.context import Context
+from xdsl.dialects import builtin, arith, func
+from xdsl.ir import Operation, Block, Region
+from xdsl.builder import Builder
+
+# Create a context (like a namespace for dialects)
+ctx = Context()
+ctx.load_dialect(builtin.Builtin)
+ctx.load_dialect(arith.Arith)
+ctx.load_dialect(func.Func)
+
+# Build a simple function that adds two numbers
+@Builder.implicit_region
+def create_add_function():
+    # Create function signature: (i32, i32) -> i32
+    func_type = func.FunctionType.from_lists([builtin.i32, builtin.i32], [builtin.i32])
+    
+    with func.FuncOp("add", func_type, visibility="public").body:
+        # Get function arguments
+        arg0 = Block.current().args[0]
+        arg1 = Block.current().args[1]
+        
+        # Create add operation
+        result = arith.Addi(arg0, arg1).result
+        
+        # Return the result
+        func.Return(result)
+
+module = builtin.ModuleOp([create_add_function()])
+print(module)
+\end{lstlisting}
+
+\subsection{Understanding IR Structure}
+
+The IR in xDSL follows a hierarchical structure:
+
+\begin{tikzpicture}[node distance=1.5cm]
+    \node[draw, rectangle] (module) {Module};
+    \node[draw, rectangle, below of=module] (function) {Function};
+    \node[draw, rectangle, below of=function] (block) {Block};
+    \node[draw, rectangle, below of=block] (operation) {Operation};
+    
+    \draw[->] (module) -- (function) node[midway, right] {contains};
+    \draw[->] (function) -- (block) node[midway, right] {has body};
+    \draw[->] (block) -- (operation) node[midway, right] {contains};
+\end{tikzpicture}
+
+\subsection{Dialects: Modular IR Design}
+
+xDSL organizes operations into \textit{dialects} - collections of related operations and types. This is similar to how PyTorch has different modules (nn, optim, etc.).
+
+Common dialects in xDSL:
+\begin{itemize}
+    \item \texttt{arith}: Arithmetic operations (add, multiply, divide)
+    \item \texttt{func}: Function definitions and calls
+    \item \texttt{memref}: Memory operations (like NumPy arrays)
+    \item \texttt{scf}: Structured control flow (loops, conditionals)
+    \item \texttt{linalg}: Linear algebra operations (matrix multiply, convolution)
+\end{itemize}
+
+\section{Chapter 2: Operations and Operators}
+
+\subsection{What is an Operation?}
+
+An operation in xDSL is the fundamental unit of computation. Each operation:
+\begin{itemize}
+    \item Has a name (e.g., \texttt{arith.addi} for integer addition)
+    \item Takes input values (operands)
+    \item Produces output values (results)
+    \item May have attributes (compile-time constants)
+    \item Can contain regions (nested blocks of operations)
+\end{itemize}
+
+\subsection{Creating Custom Operations}
+
+Let's define a custom operation for matrix operations:
+
+\begin{lstlisting}[language=Python, caption=Defining Custom Operations]
+from xdsl.irdl import (
+    IRDLOperation, 
+    OpResult, 
+    Operand, 
+    OperandDef, 
+    ResultDef,
+    op_def,
+    result_def
+)
+from xdsl.dialects.builtin import TensorType
+
+@op_def
+class MatMulOp(IRDLOperation):
+    """Matrix multiplication operation"""
+    name = "my_dialect.matmul"
+    
+    # Define operands (inputs)
+    lhs = operand_def(TensorType)
+    rhs = operand_def(TensorType)
+    
+    # Define results (outputs)
+    result = result_def(TensorType)
+    
+    def __init__(self, lhs: Value, rhs: Value):
+        super().__init__(operands=[lhs, rhs], 
+                        result_types=[infer_matmul_type(lhs, rhs)])
+    
+    def verify(self):
+        """Verify that the operation is well-formed"""
+        # Check that dimensions are compatible
+        lhs_shape = self.lhs.type.shape
+        rhs_shape = self.rhs.type.shape
+        
+        if lhs_shape[-1] != rhs_shape[0]:
+            raise ValueError("Incompatible matrix dimensions")
+\end{lstlisting}
+
+\subsection{Operation Semantics}
+
+Every operation has well-defined semantics - what it means to execute that operation:
+
+\begin{lstlisting}[language=Python, caption=Operation Semantics Example]
+# Arithmetic operations
+add_op = arith.Addi(a, b)  # result = a + b
+mul_op = arith.Muli(a, b)  # result = a * b
+
+# Memory operations  
+alloc_op = memref.Alloc.get(shape=[10, 20], element_type=f32)  # Allocate 10x20 array
+load_op = memref.Load.get(memref_value, indices)  # Load from memory
+store_op = memref.Store.get(value, memref_value, indices)  # Store to memory
+
+# Control flow operations
+for_op = scf.For(lower_bound, upper_bound, step) # for loop
+if_op = scf.If(condition, has_else=True)  # if-then-else
+\end{lstlisting}
+
+\subsection{Attributes vs Operands}
+
+Understanding the difference between attributes and operands is crucial:
+
+\begin{itemize}
+    \item \textbf{Attributes}: Compile-time constants (shapes, types, flags)
+    \item \textbf{Operands}: Runtime values (variables, intermediate results)
+\end{itemize}
+
+\begin{lstlisting}[language=Python, caption=Attributes vs Operands]
+# Constant has an attribute (the value)
+const = arith.Constant.from_int_and_width(42, 32)  # 42 is an attribute
+
+# Add has operands (runtime values)
+result = arith.Addi(x, y)  # x and y are operands
+
+# Alloc has attributes (shape) but no operands
+mem = memref.Alloc.get(shape=[100], element_type=f32)  # shape is attribute
+\end{lstlisting}
+
+\section{Chapter 3: Analysis Passes}
+
+\subsection{What is Analysis?}
+
+Analysis passes extract information from IR without modifying it. They answer questions like:
+\begin{itemize}
+    \item Which variables are used where? (Use-Def Analysis)
+    \item Which operations can run in parallel? (Dependency Analysis)
+    \item What are the loop bounds? (Range Analysis)
+    \item Which operations are dead code? (Liveness Analysis)
+\end{itemize}
+
+\subsection{Writing a Simple Analysis Pass}
+
+Let's write an analysis that counts operations by type:
+
+\begin{lstlisting}[language=Python, caption=Operation Counter Analysis]
+from xdsl.passes import Pass
+from xdsl.ir import Operation, OpResult
+from collections import defaultdict
+
+class OperationCounterPass(Pass):
+    """Count operations by type in the IR"""
+    
+    name = "count-ops"
+    
+    def apply(self, module: builtin.ModuleOp) -> None:
+        op_counts = defaultdict(int)
+        
+        # Walk through all operations in the module
+        for op in module.walk():
+            op_counts[op.name] += 1
+        
+        # Print analysis results
+        print("Operation counts:")
+        for op_name, count in sorted(op_counts.items()):
+            print(f"  {op_name}: {count}")
+        
+        # Store results for use by other passes
+        self.op_counts = op_counts
+\end{lstlisting}
+
+\subsection{Use-Def Chains}
+
+Use-Def chains track where values are defined and used:
+
+\begin{lstlisting}[language=Python, caption=Use-Def Analysis]
+class UseDefAnalysis(Pass):
+    """Analyze use-def relationships"""
+    
+    def apply(self, module: builtin.ModuleOp) -> None:
+        # Build use-def chains
+        for op in module.walk():
+            for result in op.results:
+                print(f"Value {result} defined by {op.name}")
+                print(f"  Used by: {[use.operation.name for use in result.uses]}")
+    
+    def find_unused_values(self, module: builtin.ModuleOp) -> list[OpResult]:
+        """Find values that are never used"""
+        unused = []
+        for op in module.walk():
+            for result in op.results:
+                if not result.uses:
+                    unused.append(result)
+        return unused
+\end{lstlisting}
+
+\subsection{Dominance Analysis}
+
+Dominance tells us which operations must execute before others:
+
+\begin{lstlisting}[language=Python, caption=Dominance Analysis]
+from xdsl.ir import Block
+from xdsl.irdl.dominance import DominanceInfo
+
+class DominanceAnalysis(Pass):
+    """Analyze control flow dominance"""
+    
+    def apply(self, module: builtin.ModuleOp) -> None:
+        # For each function in the module
+        for func_op in module.body.ops:
+            if isinstance(func_op, func.FuncOp):
+                dom_info = DominanceInfo(func_op.body)
+                
+                # Check dominance relationships
+                for block in func_op.body.blocks:
+                    dominators = dom_info.get_dominators(block)
+                    print(f"Block {block} dominated by: {dominators}")
+\end{lstlisting}
+
+\subsection{Dataflow Analysis}
+
+Dataflow analysis propagates information through the program:
+
+\begin{lstlisting}[language=Python, caption=Constant Propagation Analysis]
+class ConstantPropagationAnalysis(Pass):
+    """Analyze which values are compile-time constants"""
+    
+    def apply(self, module: builtin.ModuleOp) -> None:
+        known_constants = {}
+        
+        # First pass: identify constants
+        for op in module.walk():
+            if isinstance(op, arith.Constant):
+                known_constants[op.result] = op.value.value
+        
+        # Iteratively propagate constants
+        changed = True
+        while changed:
+            changed = False
+            for op in module.walk():
+                if isinstance(op, arith.Addi):
+                    # If both operands are known constants
+                    if (op.lhs in known_constants and 
+                        op.rhs in known_constants):
+                        result_value = (known_constants[op.lhs] + 
+                                      known_constants[op.rhs])
+                        if op.result not in known_constants:
+                            known_constants[op.result] = result_value
+                            changed = True
+        
+        return known_constants
+\end{lstlisting}
+
+\section{Chapter 4: Transformations and Optimizations}
+
+\subsection{What is a Transformation?}
+
+Transformations modify the IR to improve performance, reduce code size, or prepare for further optimizations. Unlike analysis passes, transformations actually change the program structure.
+
+Key principles:
+\begin{itemize}
+    \item \textbf{Correctness}: Must preserve program semantics
+    \item \textbf{Profitability}: Should improve some metric (speed, size, power)
+    \item \textbf{Composability}: Should work well with other transformations
+\end{itemize}
+
+\subsection{Pattern-Based Rewriting}
+
+xDSL provides powerful pattern matching for transformations:
+
+\begin{lstlisting}[language=Python, caption=Simple Algebraic Optimization]
+from xdsl.pattern_rewriter import (
+    PatternRewriter, 
+    RewritePattern,
+    op_type_rewrite_pattern
+)
+
+class FoldAddZero(RewritePattern):
+    """Fold x + 0 -> x"""
+    
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: arith.Addi, 
+                         rewriter: PatternRewriter) -> None:
+        # Check if right operand is zero
+        if isinstance(op.rhs.owner, arith.Constant):
+            if op.rhs.owner.value.value == 0:
+                # Replace all uses of the add with the left operand
+                rewriter.replace_op(op, [op.lhs])
+                return
+        
+        # Check if left operand is zero  
+        if isinstance(op.lhs.owner, arith.Constant):
+            if op.lhs.owner.value.value == 0:
+                rewriter.replace_op(op, [op.rhs])
+\end{lstlisting}
+
+\subsection{Common Optimizations}
+
+\subsubsection{Dead Code Elimination}
+
+Remove operations whose results are never used:
+
+\begin{lstlisting}[language=Python, caption=Dead Code Elimination]
+class DeadCodeElimination(Pass):
+    """Remove unused operations"""
+    
+    def apply(self, module: builtin.ModuleOp) -> None:
+        ops_to_remove = []
+        
+        for op in module.walk():
+            # Skip operations with side effects
+            if self.has_side_effects(op):
+                continue
+                
+            # Check if any results are used
+            all_dead = all(not result.uses for result in op.results)
+            
+            if all_dead:
+                ops_to_remove.append(op)
+        
+        # Remove dead operations
+        for op in ops_to_remove:
+            op.erase()
+    
+    def has_side_effects(self, op: Operation) -> bool:
+        """Check if operation has side effects"""
+        # Memory writes, function calls, etc.
+        return isinstance(op, (memref.Store, func.Call))
+\end{lstlisting}
+
+\subsubsection{Common Subexpression Elimination}
+
+Identify and eliminate redundant computations:
+
+\begin{lstlisting}[language=Python, caption=Common Subexpression Elimination]
+class CommonSubexpressionElimination(Pass):
+    """Eliminate redundant computations"""
+    
+    def apply(self, module: builtin.ModuleOp) -> None:
+        # Map from (op_type, operands) to result
+        expression_map = {}
+        
+        for op in module.walk():
+            if self.is_pure(op):
+                # Create a key for this expression
+                key = self.get_expression_key(op)
+                
+                if key in expression_map:
+                    # Found duplicate - replace with existing
+                    existing_result = expression_map[key]
+                    op.results[0].replace_by(existing_result)
+                    op.erase()
+                else:
+                    # First occurrence - remember it
+                    expression_map[key] = op.results[0]
+    
+    def get_expression_key(self, op: Operation):
+        """Create hashable key for expression"""
+        return (op.name, tuple(op.operands))
+\end{lstlisting}
+
+\subsubsection{Loop Optimizations}
+
+Optimize loop structures for better performance:
+
+\begin{lstlisting}[language=Python, caption=Loop Unrolling]
+class LoopUnrolling(Pass):
+    """Unroll small loops"""
+    
+    def apply(self, module: builtin.ModuleOp) -> None:
+        for op in module.walk():
+            if isinstance(op, scf.For):
+                if self.should_unroll(op):
+                    self.unroll_loop(op)
+    
+    def should_unroll(self, loop: scf.For) -> bool:
+        """Decide if loop should be unrolled"""
+        # Get loop bounds if constant
+        if (isinstance(loop.lb.owner, arith.Constant) and
+            isinstance(loop.ub.owner, arith.Constant)):
+            lb = loop.lb.owner.value.value
+            ub = loop.ub.owner.value.value
+            iterations = ub - lb
+            
+            # Unroll small loops
+            return iterations <= 4
+        return False
+    
+    def unroll_loop(self, loop: scf.For):
+        """Completely unroll a loop"""
+        # Clone loop body for each iteration
+        # Update induction variable references
+        # Remove original loop
+        pass  # Implementation details omitted
+\end{lstlisting}
+
+\subsection{Lowering Transformations}
+
+Lowering transforms high-level operations into simpler ones:
+
+\begin{lstlisting}[language=Python, caption=Lowering High-Level Operations]
+class LowerMatrixOps(Pass):
+    """Lower matrix operations to loops"""
+    
+    def apply(self, module: builtin.ModuleOp) -> None:
+        for op in module.walk():
+            if isinstance(op, MatMulOp):
+                self.lower_matmul(op)
+    
+    def lower_matmul(self, matmul: MatMulOp):
+        """Lower matmul to three nested loops"""
+        builder = Builder.before(matmul)
+        
+        # Get dimensions
+        m, k = matmul.lhs.type.shape
+        _, n = matmul.rhs.type.shape
+        
+        # Allocate result
+        result = builder.insert(memref.Alloc.get([m, n], f32))
+        
+        # Generate three nested loops
+        with builder.insert(scf.For(0, m, 1)) as i:
+            with builder.insert(scf.For(0, n, 1)) as j:
+                # Initialize accumulator
+                zero = builder.insert(arith.Constant.from_float(0.0, f32))
+                
+                with builder.insert(scf.For(0, k, 1, [zero])) as (k_idx, acc):
+                    # Load elements
+                    a_elem = builder.insert(memref.Load(matmul.lhs, [i, k_idx]))
+                    b_elem = builder.insert(memref.Load(matmul.rhs, [k_idx, j]))
+                    
+                    # Multiply and accumulate
+                    prod = builder.insert(arith.Mulf(a_elem, b_elem))
+                    new_acc = builder.insert(arith.Addf(acc, prod))
+                    
+                    scf.Yield(new_acc)
+                
+                # Store result
+                builder.insert(memref.Store(acc, result, [i, j]))
+        
+        # Replace matmul with lowered result
+        matmul.results[0].replace_by(result)
+        matmul.erase()
+\end{lstlisting}
+
+\section{Chapter 5: Practical Examples}
+
+\subsection{Building a Simple Expression Compiler}
+
+Let's build a complete compiler for arithmetic expressions:
+
+\begin{lstlisting}[language=Python, caption=Expression Compiler]
+from dataclasses import dataclass
+from typing import Union
+
+# Define AST nodes
+@dataclass
+class Expr:
+    pass
+
+@dataclass
+class Number(Expr):
+    value: int
+
+@dataclass  
+class BinaryOp(Expr):
+    left: Expr
+    op: str
+    right: Expr
+
+# Parser (simplified)
+def parse(text: str) -> Expr:
+    """Parse expression like '2 + 3 * 4'"""
+    # Implementation omitted for brevity
+    pass
+
+# IR Generator
+class ExprIRGen:
+    def __init__(self):
+        self.builder = Builder()
+        
+    def compile(self, expr: Expr) -> OpResult:
+        """Compile expression to xDSL IR"""
+        if isinstance(expr, Number):
+            return arith.Constant.from_int_and_width(
+                expr.value, 32).result
+        
+        elif isinstance(expr, BinaryOp):
+            left = self.compile(expr.left)
+            right = self.compile(expr.right)
+            
+            if expr.op == '+':
+                return arith.Addi(left, right).result
+            elif expr.op == '*':
+                return arith.Muli(left, right).result
+            # ... other operations
+
+# Optimizer
+def optimize(module: builtin.ModuleOp):
+    """Apply optimization passes"""
+    passes = [
+        ConstantFolding(),
+        CommonSubexpressionElimination(),
+        DeadCodeElimination(),
+    ]
+    
+    for pass_instance in passes:
+        pass_instance.apply(module)
+
+# Complete pipeline
+def compile_expression(text: str):
+    # Parse
+    ast = parse(text)
+    
+    # Generate IR
+    ir_gen = ExprIRGen()
+    result = ir_gen.compile(ast)
+    
+    # Wrap in module
+    module = builtin.ModuleOp([
+        func.FuncOp("compute", 
+                   func.FunctionType.from_lists([], [builtin.i32]),
+                   body=[func.Return(result)])
+    ])
+    
+    # Optimize
+    optimize(module)
+    
+    return module
+\end{lstlisting}
+
+\subsection{Implementing a Domain-Specific Optimization}
+
+Let's create an optimization for neural network operations:
+
+\begin{lstlisting}[language=Python, caption=Neural Network Optimization]
+class FuseBatchNormIntoConv(Pass):
+    """Fuse batch normalization into preceding convolution"""
+    
+    def apply(self, module: builtin.ModuleOp) -> None:
+        for conv in module.walk():
+            if isinstance(conv, nn.Conv2d):
+                # Look for batch norm following conv
+                for use in conv.result.uses:
+                    if isinstance(use.operation, nn.BatchNorm2d):
+                        self.fuse(conv, use.operation)
+    
+    def fuse(self, conv: nn.Conv2d, bn: nn.BatchNorm2d):
+        """Fuse batch norm parameters into convolution"""
+        # Extract batch norm parameters
+        gamma = bn.gamma  # scale
+        beta = bn.beta    # shift
+        mean = bn.running_mean
+        var = bn.running_var
+        eps = bn.eps
+        
+        # Compute fused weights and bias
+        std = sqrt(var + eps)
+        fused_weight = conv.weight * (gamma / std)
+        fused_bias = gamma * (conv.bias - mean) / std + beta
+        
+        # Create new convolution with fused parameters
+        fused_conv = nn.Conv2d(
+            weight=fused_weight,
+            bias=fused_bias,
+            # ... other conv parameters
+        )
+        
+        # Replace conv -> bn with fused conv
+        bn.result.replace_by(fused_conv.result)
+        conv.erase()
+        bn.erase()
+\end{lstlisting}
+
+\subsection{Building a Mini ML Compiler}
+
+Let's create a compiler for a subset of ML operations:
+
+\begin{lstlisting}[language=Python, caption=Mini ML Compiler]
+# Define ML dialect
+@dialect_def
+class MLDialect(Dialect):
+    name = "ml"
+
+@op_def
+class LinearOp(IRDLOperation):
+    """Linear layer: y = Wx + b"""
+    name = "ml.linear"
+    
+    input = operand_def(TensorType)
+    weight = operand_def(TensorType)  
+    bias = operand_def(TensorType)
+    
+    output = result_def(TensorType)
+
+@op_def
+class ReluOp(IRDLOperation):
+    """ReLU activation"""
+    name = "ml.relu"
+    
+    input = operand_def(TensorType)
+    output = result_def(TensorType)
+
+# Optimization: Fuse Linear + ReLU
+class FuseLinearRelu(RewritePattern):
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, relu: ReluOp, 
+                         rewriter: PatternRewriter):
+        # Check if input is from linear
+        if isinstance(relu.input.owner, LinearOp):
+            linear = relu.input.owner
+            
+            # Create fused operation
+            fused = LinearReluOp(
+                linear.input, 
+                linear.weight,
+                linear.bias
+            )
+            
+            # Replace both ops with fused version
+            rewriter.replace_op(relu, [fused.output])
+            rewriter.erase_op(linear)
+
+# Lower to hardware operations
+class LowerMLToHardware(Pass):
+    """Lower ML ops to target hardware"""
+    
+    def apply(self, module: builtin.ModuleOp):
+        target = self.get_target()  # CPU, GPU, TPU, etc.
+        
+        for op in module.walk():
+            if isinstance(op, LinearOp):
+                if target == "gpu":
+                    self.lower_linear_to_cublas(op)
+                elif target == "cpu":
+                    self.lower_linear_to_loops(op)
+\end{lstlisting}
+
+\section{Chapter 6: Advanced Topics}
+
+\subsection{Multi-Level IR and Progressive Lowering}
+
+Real compilers use multiple levels of abstraction:
+
+\begin{lstlisting}[language=Python, caption=Multi-Level Compilation Pipeline]
+class CompilationPipeline:
+    """Progressive lowering through multiple IR levels"""
+    
+    def compile(self, source_code: str) -> str:
+        # Level 1: High-level ML operations
+        ml_ir = parse_to_ml_dialect(source_code)
+        ml_ir = optimize_ml_level(ml_ir)
+        
+        # Level 2: Linear algebra operations
+        linalg_ir = lower_ml_to_linalg(ml_ir)
+        linalg_ir = optimize_linalg_level(linalg_ir)
+        
+        # Level 3: Loops and memory operations
+        loop_ir = lower_linalg_to_loops(linalg_ir)
+        loop_ir = optimize_loops(loop_ir)
+        
+        # Level 4: Target-specific operations
+        target_ir = lower_to_target(loop_ir)
+        target_ir = optimize_target_specific(target_ir)
+        
+        # Code generation
+        return generate_code(target_ir)
+\end{lstlisting}
+
+\subsection{Cost Models and Autotuning}
+
+Choosing the best optimization requires understanding costs:
+
+\begin{lstlisting}[language=Python, caption=Cost-Based Optimization]
+class CostModel:
+    """Estimate operation costs"""
+    
+    def estimate_cost(self, op: Operation) -> float:
+        if isinstance(op, arith.Mulf):
+            return 1.0  # FP multiply cost
+        elif isinstance(op, memref.Load):
+            return self.memory_latency(op)
+        elif isinstance(op, scf.For):
+            iterations = self.analyze_trip_count(op)
+            body_cost = sum(self.estimate_cost(body_op) 
+                          for body_op in op.body.walk())
+            return iterations * body_cost
+
+class AutotuningPass(Pass):
+    """Try different optimization strategies"""
+    
+    def apply(self, module: builtin.ModuleOp):
+        strategies = [
+            self.try_vectorization,
+            self.try_loop_tiling,
+            self.try_parallelization,
+        ]
+        
+        best_module = module
+        best_cost = self.cost_model.estimate_cost(module)
+        
+        for strategy in strategies:
+            candidate = strategy(module.clone())
+            cost = self.cost_model.estimate_cost(candidate)
+            
+            if cost < best_cost:
+                best_module = candidate
+                best_cost = cost
+        
+        return best_module
+\end{lstlisting}
+
+\subsection{Connection to ML Compilation}
+
+Modern ML frameworks are essentially compilers:
+
+\begin{itemize}
+    \item \textbf{PyTorch JIT}: Traces Python code to TorchScript IR
+    \item \textbf{TensorFlow XLA}: Compiles TF graphs to optimized kernels
+    \item \textbf{JAX}: Uses XLA for JIT compilation
+    \item \textbf{Apache TVM}: Optimizes ML models for various hardware
+\end{itemize}
+
+The concepts you've learned apply directly:
+\begin{itemize}
+    \item \textbf{Graph optimization} = IR transformation
+    \item \textbf{Kernel fusion} = Operation merging
+    \item \textbf{Memory planning} = Register allocation
+    \item \textbf{Quantization} = Type lowering
+\end{itemize}
+
+\section{Chapter 7: Hands-On Exercises}
+
+\subsection{Exercise 1: Build Your Own Optimizer}
+
+Implement an optimization that eliminates redundant memory operations:
+
+\begin{lstlisting}[language=Python, caption=Exercise: Store-Load Forwarding]
+class StoreLoadForwarding(Pass):
+    """Forward stored values to subsequent loads"""
+    
+    def apply(self, module: builtin.ModuleOp):
+        # TODO: Your implementation here
+        # Hint: Track recent stores to each memory location
+        # Replace loads with stored values when possible
+        pass
+\end{lstlisting}
+
+\subsection{Exercise 2: Create a Custom Dialect}
+
+Design a dialect for quantum computing operations:
+
+\begin{lstlisting}[language=Python, caption=Exercise: Quantum Dialect]
+@dialect_def
+class QuantumDialect(Dialect):
+    name = "quantum"
+
+# TODO: Define operations like:
+# - Hadamard gate
+# - CNOT gate  
+# - Measurement
+# - Quantum circuit optimization passes
+\end{lstlisting}
+
+\subsection{Exercise 3: Implement Vectorization}
+
+Transform scalar operations to vector operations:
+
+\begin{lstlisting}[language=Python, caption=Exercise: Auto-Vectorization]
+class Vectorization(Pass):
+    """Automatically vectorize loops"""
+    
+    def apply(self, module: builtin.ModuleOp):
+        # TODO: Find vectorizable loops
+        # Transform scalar ops to vector ops
+        # Handle loop remainder
+        pass
+\end{lstlisting}
+
+\subsection{Exercise 4: Build a Simple JIT Compiler}
+
+Create a JIT compiler for mathematical expressions:
+
+\begin{lstlisting}[language=Python, caption=Exercise: JIT Compiler]
+class ExpressionJIT:
+    """JIT compile and execute expressions"""
+    
+    def compile(self, expr_string: str):
+        # Parse expression
+        # Generate IR
+        # Optimize
+        # Generate machine code (or Python bytecode)
+        # Return callable function
+        pass
+    
+# Usage:
+jit = ExpressionJIT()
+f = jit.compile("x * 2 + y")
+result = f(x=5, y=3)  # Should return 13
+\end{lstlisting}
+
+\section{Chapter 8: Real-World Applications}
+
+\subsection{Case Study 1: Optimizing Neural Network Inference}
+
+Let's optimize a real neural network for deployment:
+
+\begin{lstlisting}[language=Python, caption=Neural Network Optimization Pipeline]
+def optimize_nn_for_deployment(model: NeuralNetwork):
+    """Optimize neural network for inference"""
+    
+    # Convert to IR
+    ir = convert_nn_to_ir(model)
+    
+    # Apply optimizations
+    optimizations = [
+        # Structural optimizations
+        FuseLayers(),           # Conv+BN, Linear+ReLU
+        RemoveDropout(),        # Not needed for inference
+        
+        # Quantization
+        QuantizeWeights(bits=8),
+        QuantizeActivations(bits=8),
+        
+        # Memory optimizations
+        InplaceOperations(),    # Reuse buffers
+        MemoryPlanning(),       # Minimize allocation
+        
+        # Target-specific
+        UseTargetIntrinsics(),  # AVX, NEON, etc.
+        AutoTuneKernels(),      # Platform-specific tuning
+    ]
+    
+    for opt in optimizations:
+        ir = opt.apply(ir)
+    
+    return ir
+\end{lstlisting}
+
+\subsection{Case Study 2: Domain-Specific Language Compiler}
+
+Build a compiler for financial computations:
+
+\begin{lstlisting}[language=Python, caption=Financial DSL Compiler]
+# Define financial operations dialect
+@dialect_def
+class FinanceDialect(Dialect):
+    name = "finance"
+    
+    @op_def
+    class BlackScholesOp(IRDLOperation):
+        """Black-Scholes option pricing"""
+        name = "finance.black_scholes"
+        
+        spot = operand_def(f64)
+        strike = operand_def(f64)
+        time = operand_def(f64)
+        rate = operand_def(f64)
+        volatility = operand_def(f64)
+        
+        call_price = result_def(f64)
+        put_price = result_def(f64)
+
+# Optimize for numerical stability
+class NumericalStabilityPass(Pass):
+    """Ensure numerical stability in financial calculations"""
+    
+    def apply(self, module: builtin.ModuleOp):
+        for op in module.walk():
+            if isinstance(op, math.ExpOp):
+                # Prevent overflow/underflow
+                self.add_range_check(op)
+            elif isinstance(op, arith.DivfOp):
+                # Prevent division by zero
+                self.add_zero_check(op)
+\end{lstlisting}
+
+\subsection{Case Study 3: Compiler for Distributed Computing}
+
+Compile programs for distributed execution:
+
+\begin{lstlisting}[language=Python, caption=Distributed Computing Compiler]
+@dialect_def
+class DistributedDialect(Dialect):
+    name = "dist"
+    
+    @op_def
+    class AllReduceOp(IRDLOperation):
+        """All-reduce across distributed nodes"""
+        name = "dist.allreduce"
+        
+        input = operand_def(TensorType)
+        output = result_def(TensorType)
+        reduction = attr_def(str)  # "sum", "max", etc.
+
+class DistributionPass(Pass):
+    """Distribute computation across nodes"""
+    
+    def apply(self, module: builtin.ModuleOp):
+        # Analyze data dependencies
+        deps = self.analyze_dependencies(module)
+        
+        # Partition computation
+        partitions = self.partition_computation(module, deps)
+        
+        # Insert communication operations
+        for partition in partitions:
+            self.insert_communication_ops(partition)
+        
+        # Generate distributed code
+        return self.generate_distributed_code(partitions)
+\end{lstlisting}
+
+\section{Conclusion: Your Journey Forward}
+
+\subsection{What You've Learned}
+
+Congratulations! You now understand:
+\begin{itemize}
+    \item How compilers represent programs as structured data (IR)
+    \item The role of operations, attributes, and types
+    \item How to write analysis passes to understand code
+    \item How to implement transformations that optimize programs
+    \item The connection between compiler techniques and ML optimization
+\end{itemize}
+
+\subsection{Next Steps}
+
+Your compiler journey doesn't end here:
+
+\begin{enumerate}
+    \item \textbf{Explore Real Compilers}: Study LLVM, GCC, or V8
+    \item \textbf{Contribute to xDSL}: Add new dialects or optimizations
+    \item \textbf{Apply to Your Domain}: Build domain-specific compilers
+    \item \textbf{Learn Advanced Topics}:
+    \begin{itemize}
+        \item Polyhedral compilation
+        \item Verified compilation
+        \item Quantum compilation
+        \item Neuromorphic compilation
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Resources for Further Learning}
+
+\begin{itemize}
+    \item \textbf{xDSL Documentation}: \url{https://xdsl.dev}
+    \item \textbf{MLIR Tutorial}: \url{https://mlir.llvm.org/docs/Tutorials/}
+    \item \textbf{Engineering a Compiler} (Cooper \& Torczon)
+    \item \textbf{Modern Compiler Implementation} (Appel)
+    \item \textbf{The SSA Book}: \url{http://ssabook.gforge.inria.fr/}
+\end{itemize}
+
+\subsection{Final Thoughts}
+
+Compilers are the bridge between human intent and machine execution. As AI/ML systems become more complex and heterogeneous hardware becomes more prevalent, understanding compilation becomes crucial. The techniques you've learned - representation, analysis, and transformation - are fundamental to building efficient, scalable systems.
+
+Remember: Every optimization you write makes programs faster, every analysis you implement makes systems more reliable, and every transformation you create pushes the boundaries of what's computationally possible.
+
+Happy compiling!
+
+\appendix
+
+\section{Appendix A: xDSL Quick Reference}
+
+\subsection{Common Operations}
+
+\begin{lstlisting}[language=Python, caption=xDSL Operations Quick Reference]
+# Arithmetic
+arith.Constant.from_int_and_width(42, 32)  # Integer constant
+arith.Constant.from_float(3.14, f32)       # Float constant
+arith.Addi(a, b)  # Integer addition
+arith.Muli(a, b)  # Integer multiplication
+arith.Addf(x, y)  # Float addition
+arith.Mulf(x, y)  # Float multiplication
+
+# Memory
+memref.Alloc.get(shape=[10, 20], element_type=f32)
+memref.Load(mem, indices)
+memref.Store(value, mem, indices)
+
+# Control Flow
+scf.For(start, end, step, init_values)
+scf.If(condition, has_else=True)
+scf.While(init_values)
+
+# Functions
+func.FuncOp(name, func_type, body)
+func.Call(func_name, args)
+func.Return(values)
+\end{lstlisting}
+
+\subsection{Common Patterns}
+
+\begin{lstlisting}[language=Python, caption=Common xDSL Patterns]
+# Walking operations
+for op in module.walk():
+    process(op)
+
+# Pattern matching
+if isinstance(op, arith.Addi):
+    handle_add(op)
+
+# Building IR
+with Builder.implicit_region():
+    result = arith.Addi(a, b).result
+
+# Replacing operations
+old_op.results[0].replace_by(new_value)
+old_op.erase()
+\end{lstlisting}
+
+\section{Appendix B: Setting Up Your Environment}
+
+\subsection{Installation}
+
+\begin{lstlisting}[language=bash, caption=Installing xDSL]
+# Install xDSL
+pip install xdsl
+
+# For development
+git clone https://github.com/xdslproject/xdsl.git
+cd xdsl
+pip install -e ".[dev]"
+
+# Run tests
+pytest tests/
+\end{lstlisting}
+
+\subsection{Your First xDSL Program}
+
+\begin{lstlisting}[language=Python, caption=hello_compiler.py]
+#!/usr/bin/env python3
+
+from xdsl.context import Context
+from xdsl.dialects import builtin, arith, func
+from xdsl.printer import Printer
+
+# Create context and load dialects
+ctx = Context()
+ctx.load_dialect(builtin.Builtin)
+ctx.load_dialect(arith.Arith)
+ctx.load_dialect(func.Func)
+
+# Build a simple function
+func_type = func.FunctionType.from_lists([builtin.i32], [builtin.i32])
+
+with func.FuncOp("double", func_type).body as func_body:
+    arg = func_body.block.args[0]
+    two = arith.Constant.from_int_and_width(2, 32)
+    result = arith.Muli(arg, two)
+    func.Return(result)
+
+# Create module
+module = builtin.ModuleOp([func_body.owner])
+
+# Print the IR
+printer = Printer()
+printer.print_op(module)
+\end{lstlisting}
+
+\section{Appendix C: Glossary}
+
+\begin{description}
+    \item[AST] Abstract Syntax Tree - Tree representation of source code structure
+    \item[Basic Block] Sequence of operations with single entry and exit
+    \item[CFG] Control Flow Graph - Graph showing possible execution paths
+    \item[Dataflow] Analysis tracking how data moves through program
+    \item[Dialect] Collection of related operations and types in xDSL
+    \item[Dominance] Relationship where one operation must execute before another
+    \item[IR] Intermediate Representation - Compiler's internal program representation
+    \item[Lowering] Transforming high-level operations to simpler ones
+    \item[Operation] Fundamental unit of computation in xDSL
+    \item[Operand] Input value to an operation
+    \item[Pass] Transformation or analysis applied to IR
+    \item[Pattern] Template for matching and replacing IR structures
+    \item[Region] Container for blocks in xDSL (e.g., function body, loop body)
+    \item[Result] Output value from an operation
+    \item[SSA] Single Static Assignment - Form where each variable assigned once
+    \item[Type] Description of data format and constraints
+    \item[Use-Def Chain] Links between value definitions and uses
+    \item[Value] Data flowing between operations (operands and results)
+    \item[Verification] Checking that IR is well-formed and valid
+\end{description}
+
+\end{document}
