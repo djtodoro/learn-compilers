@@ -66,7 +66,7 @@ If you're an ML engineer curious about what happens "under the hood" when your m
 
 \subsection{Compilers: The Invisible Revolution That Changed Computing}
 
-Compilers are perhaps the most transformative technology in the history of computing, yet they work so seamlessly that we rarely think about them. To understand their revolutionary impact, consider this: the Linux kernel, which powers billions of devices worldwide, was initially (mostly) written in assembly language - a tedious, error-prone process where programmers had to think in terms of individual CPU instructions and memory addresses. Each line of assembly code corresponded directly to a machine instruction, making even simple tasks require hundreds of lines of code.
+Compilers are perhaps the most transformative technology in the history of computing, yet they work so seamlessly that we rarely think about them. To understand their revolutionary impact, consider this: the Linux kernel, which powers billions of devices worldwide, was initially written in assembly language - a tedious, error-prone process where programmers had to think in terms of individual CPU instructions and memory addresses. Each line of assembly code corresponded directly to a machine instruction, making even simple tasks require hundreds of lines of code.
 
 Then came the evolution of the C compiler. As compilers matured, they could translate high-level C code into assembly with equal or sometimes even better performance than hand-written assembly. This transformation was revolutionary - Linux could be rewritten in C, making it portable across different architectures, easier to maintain, and accessible to a broader community of developers. What once required intimate knowledge of specific CPU architectures could now be expressed in readable, maintainable code. The compiler handled the complex translation, optimization, and architecture-specific details automatically.
 
@@ -1068,72 +1068,380 @@ The concepts you've learned apply directly:
 
 \section{Chapter 7: Hands-On Exercises}
 
-\subsection{Exercise 1: Build Your Own Optimizer}
+\subsection{Introduction: Learning by Doing}
 
-Implement an optimization that eliminates redundant memory operations:
+The exercises in this chapter are designed to solidify your understanding of compiler concepts through practical implementation. Each exercise builds upon the concepts we've covered, challenging you to apply your knowledge in increasingly sophisticated ways. These aren't just academic exercises - they mirror real-world compiler engineering challenges you'll encounter in production systems.
+
+\textbf{Goals of These Exercises:}
+\begin{itemize}
+    \item \textbf{Reinforce Core Concepts}: Apply IR manipulation, pattern matching, and transformation techniques in practice
+    \item \textbf{Develop Compiler Intuition}: Understand trade-offs between different optimization strategies
+    \item \textbf{Build Debugging Skills}: Learn to verify correctness and debug transformation passes
+    \item \textbf{Connect Theory to Practice}: See how abstract concepts translate to real optimizations
+\end{itemize}
+
+\subsection{Exercise 1: Build Your Own Optimizer - Store-Load Forwarding}
+
+\subsubsection{Context and Motivation}
+
+Memory operations are often bottlenecks in program performance. When a program stores a value to memory and immediately loads it back, we're wasting cycles on unnecessary memory traffic. Store-load forwarding is a crucial optimization in modern compilers and CPUs that eliminates these redundant operations.
+
+\textbf{Real-World Impact:} This optimization is so important that modern CPUs implement it in hardware. By doing it in the compiler, we can eliminate the operations entirely, reducing both memory bandwidth and instruction count.
+
+\textbf{What You'll Learn:}
+\begin{itemize}
+    \item How to track data flow through memory operations
+    \item Alias analysis basics (when is it safe to forward?)
+    \item The importance of maintaining program correctness during optimization
+    \item How to reason about memory dependencies
+\end{itemize}
 
 \begin{lstlisting}[language=Python, caption=Exercise: Store-Load Forwarding]
 class StoreLoadForwarding(Pass):
-    """Forward stored values to subsequent loads"""
+    """Forward stored values to subsequent loads
+    
+    Transform patterns like:
+        memref.store %value, %mem[%i, %j]
+        %loaded = memref.load %mem[%i, %j]
+    Into:
+        memref.store %value, %mem[%i, %j]
+        // Use %value directly instead of %loaded
+    """
     
     def apply(self, module: builtin.ModuleOp):
         # TODO: Your implementation here
-        # Hint: Track recent stores to each memory location
-        # Replace loads with stored values when possible
+        # Step 1: Build a map of recent stores for each memory location
+        # Step 2: For each load, check if we have a recent store
+        # Step 3: Verify indices match exactly (be conservative!)
+        # Step 4: Check for intervening operations that might invalidate
+        # Step 5: Replace load result with stored value
+        
+        # Hints:
+        # - Start simple: handle only same-block forwarding
+        # - Be conservative: only forward when indices are identical
+        # - Watch for: function calls, other stores to same array
+        # - Remember: correctness > performance
+        pass
+
+    def can_forward(self, store_op, load_op):
+        """Check if it's safe to forward from store to load"""
+        # TODO: Implement safety checks
         pass
 \end{lstlisting}
 
-\subsection{Exercise 2: Create a Custom Dialect}
+\subsubsection{Testing Your Implementation}
 
-Design a dialect for quantum computing operations:
+\begin{lstlisting}[language=Python, caption=Test Cases for Store-Load Forwarding]
+def test_store_load_forwarding():
+    """Test your optimization works correctly"""
+    
+    # Test case 1: Simple forwarding
+    # store 42 to mem[0]
+    # load from mem[0]  <-- should be replaced with 42
+    
+    # Test case 2: Different indices (no forwarding)
+    # store 42 to mem[0]
+    # load from mem[1]  <-- should NOT be forwarded
+    
+    # Test case 3: Intervening store
+    # store 42 to mem[0]
+    # store 100 to mem[0]
+    # load from mem[0]  <-- should get 100, not 42
+    
+    # Test case 4: Across basic blocks (advanced)
+    # Requires dominance analysis
+\end{lstlisting}
+
+\subsection{Exercise 2: Create a Custom Dialect - Quantum Computing}
+
+\subsubsection{Context and Motivation}
+
+Quantum computing represents a fundamentally different computational model. By creating a quantum dialect, you'll learn how compiler infrastructure can be extended to support entirely new paradigms. This exercise demonstrates xDSL's extensibility and teaches you to think about computation abstractly.
+
+\textbf{Why This Matters:} As new computational paradigms emerge (quantum, neuromorphic, photonic), the ability to quickly prototype new compiler infrastructure becomes crucial. This exercise teaches you the skills needed to support future computing platforms.
+
+\textbf{What You'll Learn:}
+\begin{itemize}
+    \item How to design operations for non-standard computation models
+    \item Type system design for domain-specific constraints
+    \item Verification of domain-specific invariants
+    \item Lowering from high-level domain concepts to implementation
+\end{itemize}
 
 \begin{lstlisting}[language=Python, caption=Exercise: Quantum Dialect]
+from xdsl.irdl import irdl_op_definition, irdl_attr_definition
+from xdsl.ir import OpResult, SSAValue
+
 @dialect_def
 class QuantumDialect(Dialect):
     name = "quantum"
 
-# TODO: Define operations like:
-# - Hadamard gate
-# - CNOT gate  
-# - Measurement
-# - Quantum circuit optimization passes
+# TODO: Define quantum-specific types
+@irdl_attr_definition
+class QubitType(TypeAttribute):
+    """Type representing a quantum bit"""
+    name = "quantum.qubit"
+
+@irdl_attr_definition  
+class QuantumRegisterType(TypeAttribute):
+    """Type for quantum register of n qubits"""
+    name = "quantum.qreg"
+    size: int
+
+# TODO: Define quantum gates
+@irdl_op_definition
+class HadamardOp(IRDLOperation):
+    """Hadamard gate: creates superposition"""
+    name = "quantum.h"
+    
+    input_qubit = operand_def(QubitType)
+    output_qubit = result_def(QubitType)
+    
+    def verify(self):
+        """Verify operation is well-formed"""
+        # Hadamard is always valid on a single qubit
+        pass
+
+@irdl_op_definition
+class CNOTOp(IRDLOperation):
+    """Controlled-NOT gate"""
+    name = "quantum.cnot"
+    
+    control = operand_def(QubitType)
+    target = operand_def(QubitType)
+    
+    # CNOT modifies both qubits
+    new_control = result_def(QubitType)
+    new_target = result_def(QubitType)
+
+@irdl_op_definition
+class MeasureOp(IRDLOperation):
+    """Measure qubit, collapsing to classical bit"""
+    name = "quantum.measure"
+    
+    qubit = operand_def(QubitType)
+    classical_bit = result_def(IntegerType(1))
+
+# TODO: Optimization passes
+class QuantumCircuitOptimizer(Pass):
+    """Optimize quantum circuits"""
+    
+    def apply(self, module: builtin.ModuleOp):
+        # TODO: Implement optimizations like:
+        # - Gate cancellation (H·H = I)
+        # - Gate commutation 
+        # - Circuit depth reduction
+        pass
 \end{lstlisting}
+
+\subsubsection{Challenge Extensions}
+\begin{itemize}
+    \item Implement quantum circuit simulation
+    \item Add error correction operations
+    \item Create a cost model for quantum operations
+    \item Implement decomposition to basic gate sets
+\end{itemize}
 
 \subsection{Exercise 3: Implement Vectorization}
 
-Transform scalar operations to vector operations:
+\subsubsection{Context and Motivation}
+
+Modern processors have SIMD (Single Instruction, Multiple Data) units that can process multiple data elements simultaneously. Vectorization transforms scalar operations to leverage these capabilities, often providing 4-8x speedups. This is a cornerstone optimization in high-performance computing.
+
+\textbf{Industry Relevance:} Every production compiler implements auto-vectorization. ML frameworks rely heavily on vectorized operations for performance. Understanding vectorization is essential for performance engineering.
+
+\textbf{What You'll Learn:}
+\begin{itemize}
+    \item How to identify vectorizable patterns
+    \item Dependency analysis for parallel execution
+    \item Handling edge cases (loop remainders, alignment)
+    \item Cost modeling for vectorization decisions
+\end{itemize}
 
 \begin{lstlisting}[language=Python, caption=Exercise: Auto-Vectorization]
 class Vectorization(Pass):
-    """Automatically vectorize loops"""
+    """Automatically vectorize loops
+    
+    Transform:
+        for i in range(n):
+            c[i] = a[i] + b[i]
+    
+    Into:
+        for i in range(0, n-4, 4):
+            c[i:i+4] = a[i:i+4] + b[i:i+4]  # Vector operation
+        for i in range(n-n%4, n):
+            c[i] = a[i] + b[i]  # Scalar remainder
+    """
+    
+    def __init__(self, vector_width=4):
+        self.vector_width = vector_width
     
     def apply(self, module: builtin.ModuleOp):
-        # TODO: Find vectorizable loops
-        # Transform scalar ops to vector ops
-        # Handle loop remainder
+        for loop in self.find_loops(module):
+            if self.is_vectorizable(loop):
+                self.vectorize_loop(loop)
+    
+    def is_vectorizable(self, loop: scf.For) -> bool:
+        """Check if loop can be vectorized"""
+        # TODO: Check for:
+        # 1. No loop-carried dependencies
+        # 2. Contiguous memory access
+        # 3. Supported operations (add, mul, etc.)
+        # 4. No control flow in loop body
+        pass
+    
+    def vectorize_loop(self, loop: scf.For):
+        """Transform loop to use vector operations"""
+        # TODO: Implementation steps:
+        # 1. Create vector loop with stride = vector_width
+        # 2. Replace scalar ops with vector ops
+        # 3. Create remainder loop for n % vector_width iterations
+        # 4. Update memory operations to vector loads/stores
+        pass
+    
+    def analyze_dependencies(self, loop: scf.For) -> bool:
+        """Check for loop-carried dependencies"""
+        # TODO: Implement dependency analysis
+        # Look for patterns like a[i] = a[i-1] + b[i]
         pass
 \end{lstlisting}
 
+\subsubsection{Advanced Challenges}
+\begin{itemize}
+    \item Handle non-unit stride access patterns
+    \item Implement cost model to decide when vectorization is profitable
+    \item Support reduction operations (sum, max)
+    \item Handle conditional operations with masking
+\end{itemize}
+
 \subsection{Exercise 4: Build a Simple JIT Compiler}
 
-Create a JIT compiler for mathematical expressions:
+\subsubsection{Context and Motivation}
+
+Just-In-Time compilation bridges the gap between interpretation and ahead-of-time compilation. By compiling code at runtime, JIT compilers can optimize based on actual execution patterns. This exercise gives you hands-on experience with the full compilation pipeline.
+
+\textbf{Real-World Applications:} JIT compilation powers JavaScript engines (V8), Java VMs (HotSpot), Python (PyPy), and ML frameworks (JAX, PyTorch). Understanding JIT compilation is crucial for modern system design.
+
+\textbf{What You'll Learn:}
+\begin{itemize}
+    \item The complete compilation pipeline from source to execution
+    \item Runtime code generation techniques
+    \item Optimization decisions based on runtime information
+    \item Integration between compiled and interpreted code
+\end{itemize}
 
 \begin{lstlisting}[language=Python, caption=Exercise: JIT Compiler]
+import ctypes
+from typing import Dict, Callable
+
 class ExpressionJIT:
-    """JIT compile and execute expressions"""
+    """JIT compile and execute mathematical expressions
     
-    def compile(self, expr_string: str):
-        # Parse expression
-        # Generate IR
-        # Optimize
-        # Generate machine code (or Python bytecode)
-        # Return callable function
+    This JIT compiler will:
+    1. Parse expressions into AST
+    2. Generate xDSL IR
+    3. Optimize the IR
+    4. Generate executable code
+    5. Return a callable Python function
+    """
+    
+    def __init__(self):
+        self.cache: Dict[str, Callable] = {}
+        self.optimization_level = 2
+    
+    def compile(self, expr_string: str) -> Callable:
+        """Compile expression to native function"""
+        
+        # Check cache first
+        if expr_string in self.cache:
+            return self.cache[expr_string]
+        
+        # Step 1: Parse expression
+        ast = self.parse_expression(expr_string)
+        
+        # Step 2: Generate IR
+        ir_module = self.generate_ir(ast)
+        
+        # Step 3: Optimize
+        if self.optimization_level > 0:
+            ir_module = self.optimize_ir(ir_module)
+        
+        # Step 4: Generate machine code
+        machine_code = self.generate_code(ir_module)
+        
+        # Step 5: Create callable wrapper
+        func = self.create_callable(machine_code)
+        
+        # Cache for future use
+        self.cache[expr_string] = func
+        
+        return func
+    
+    def parse_expression(self, expr: str):
+        """Parse expression into AST"""
+        # TODO: Implement expression parser
+        # Support: numbers, variables, +, -, *, /, parentheses
+        # Example: "x * 2 + y" -> BinaryOp('+', BinaryOp('*', Var('x'), Num(2)), Var('y'))
         pass
     
-# Usage:
+    def generate_ir(self, ast) -> builtin.ModuleOp:
+        """Generate xDSL IR from AST"""
+        # TODO: Create IR module with function
+        # Function should take dict of variables, return result
+        pass
+    
+    def optimize_ir(self, module: builtin.ModuleOp) -> builtin.ModuleOp:
+        """Apply optimization passes"""
+        passes = [
+            ConstantFolding(),
+            CommonSubexpressionElimination(),
+            DeadCodeElimination(),
+        ]
+        
+        for opt_pass in passes:
+            opt_pass.apply(module)
+        
+        return module
+    
+    def generate_code(self, module: builtin.ModuleOp) -> bytes:
+        """Generate machine code or Python bytecode"""
+        # TODO: Options:
+        # 1. Generate Python bytecode using 'compile()'
+        # 2. Use LLVM bindings to generate native code
+        # 3. Generate C code and compile with ctypes
+        pass
+    
+    def create_callable(self, code: bytes) -> Callable:
+        """Create Python-callable function from machine code"""
+        # TODO: Wrap machine code in Python-callable interface
+        pass
+
+# Usage example:
 jit = ExpressionJIT()
 f = jit.compile("x * 2 + y")
 result = f(x=5, y=3)  # Should return 13
+
+# Advanced: Support for conditionals
+g = jit.compile("x > 0 ? x * 2 : -x")
+result2 = g(x=-5)  # Should return 5
+\end{lstlisting}
+
+\subsubsection{Implementation Hints}
+
+\begin{lstlisting}[language=Python, caption=JIT Implementation Starter Code]
+# Simple approach using Python's compile()
+def generate_python_code(self, module: builtin.ModuleOp) -> str:
+    """Generate Python source from IR"""
+    code = "def compiled_func(**variables):\n"
+    # Walk IR and generate Python code
+    # ...
+    return code
+
+def create_callable_simple(self, py_code: str) -> Callable:
+    """Create function from Python code"""
+    exec_globals = {}
+    exec(py_code, exec_globals)
+    return exec_globals['compiled_func']
 \end{lstlisting}
 
 \section{Chapter 8: Real-World Applications}
@@ -1247,6 +1555,686 @@ class DistributionPass(Pass):
         # Generate distributed code
         return self.generate_distributed_code(partitions)
 \end{lstlisting}
+
+\section{Project: Building a Matrix Operations Compiler}
+
+\subsection{Project Overview}
+
+In this capstone project, you'll build a complete compiler for a domain-specific language focused on matrix operations. The goal is to take a Python-like program that performs matrix operations (including transpose and the inefficient double transpose pattern), parse it, create a custom MLIR dialect, generate IR, and implement an optimization pass that eliminates redundant double transposes.
+
+A complete implementation of this compiler is available at: \url{https://github.com/djtodoro/matrix-toy-lang}
+
+\textbf{Learning Objectives:}
+\begin{itemize}
+    \item Integrate all concepts from the course into a complete compiler
+    \item Experience the full compiler development workflow from parsing to optimization
+    \item Build a custom MLIR dialect using xDSL framework
+    \item Implement pattern-based optimizations (double transpose elimination)
+    \item Create a command-line compiler tool with real input/output
+    \item Practice modular compiler design with separate parsing, IR generation, and optimization phases
+\end{itemize}
+
+\textbf{Key Components:}
+\begin{enumerate}
+    \item \textbf{Parser}: Python AST-based parser that extracts matrix operations from a custom `.mx` file format
+    \item \textbf{Matrix Dialect}: Custom MLIR dialect with operations for matrix allocation, addition, multiplication, and transpose
+    \item \textbf{IR Generator}: Converts parsed operations to MLIR IR using the matrix dialect
+    \item \textbf{Optimizer}: Pattern rewriter that eliminates double transpose operations
+    \item \textbf{Compiler Driver}: Command-line tool (\texttt{matrixc}) that orchestrates the compilation pipeline
+\end{enumerate}
+
+\subsection{Part 1: The Input Program}
+
+The compiler accepts input files with a `.mx` extension containing Python-like matrix operations. Here's an example input program that demonstrates the double transpose optimization:
+
+\begin{lstlisting}[language=Python, caption=main\_input.mx - Example Input Program]
+"""
+Simple double transpose optimization demonstration.
+"""
+
+def matrix_computation(A, B):
+    """
+    Demonstrate double transpose optimization patterns.
+    
+    Args:
+        A: First input matrix
+        B: Second input matrix
+    
+    Returns:
+        Result matrix after operations
+    """
+    # Double transpose on A (should be optimized to just A)
+    C = A.T.T
+    
+    # Another double transpose pattern on B
+    D = B.T
+    E = D.T  # E should equal B
+    
+    # Add the results
+    F = C + E
+    
+    # Final double transpose
+    result = F.T.T
+    
+    return result
+
+def main():
+    """Main function to test matrix computation."""
+    # Define two 3x3 matrices
+    A = matrix([[1, 2, 3],
+                [4, 5, 6],
+                [7, 8, 9]])
+    
+    B = matrix([[9, 8, 7],
+                [6, 5, 4],
+                [3, 2, 1]])
+
+    # Run the computation
+    result = matrix_computation(A, B)
+
+\end{lstlisting}
+
+\subsection{Compilation Example}
+
+When the above program is compiled, the compiler performs several transformations:
+
+\textbf{Initial IR (without optimization):}
+\begin{lstlisting}[caption=Unoptimized IR with Double Transposes]
+func.func @matrix_computation(%A : !matrix.type<4, 4, f32>, 
+                               %B : !matrix.type<4, 4, f32>) 
+                               -> !matrix.type<4, 4, f32> {
+    %0 = "matrix.transpose"(%A) : (!matrix.type<4, 4, f32>) 
+                                  -> !matrix.type<4, 4, f32>
+    %1 = "matrix.transpose"(%0) : (!matrix.type<4, 4, f32>) 
+                                  -> !matrix.type<4, 4, f32>  // A.T.T
+    %2 = "matrix.transpose"(%B) : (!matrix.type<4, 4, f32>) 
+                                  -> !matrix.type<4, 4, f32>
+    %3 = "matrix.transpose"(%2) : (!matrix.type<4, 4, f32>) 
+                                  -> !matrix.type<4, 4, f32>  // B.T.T
+    %4 = "matrix.add"(%1, %3) : (!matrix.type<4, 4, f32>, 
+                                 !matrix.type<4, 4, f32>) 
+                                -> !matrix.type<4, 4, f32>
+    %5 = "matrix.transpose"(%4) : (!matrix.type<4, 4, f32>) 
+                                  -> !matrix.type<4, 4, f32>
+    %6 = "matrix.transpose"(%5) : (!matrix.type<4, 4, f32>) 
+                                  -> !matrix.type<4, 4, f32>  // result.T.T
+    func.return %6 : !matrix.type<4, 4, f32>
+}
+\end{lstlisting}
+
+\textbf{Optimized IR (after double transpose elimination):}
+\begin{lstlisting}[caption=Optimized IR with Transposes Eliminated]
+func.func @matrix_computation(%A : !matrix.type<4, 4, f32>, 
+                               %B : !matrix.type<4, 4, f32>) 
+                               -> !matrix.type<4, 4, f32> {
+    %0 = "matrix.add"(%A, %B) : (!matrix.type<4, 4, f32>, 
+                                 !matrix.type<4, 4, f32>) 
+                                -> !matrix.type<4, 4, f32>
+    func.return %0 : !matrix.type<4, 4, f32>
+}
+\end{lstlisting}
+
+The optimization pass successfully eliminated all three double transpose patterns, reducing the operation count from 7 to 1.
+
+\subsection{Part 2: Parser Implementation}
+
+The parser uses Python's built-in AST module to extract matrix operations from the input `.mx` files. The implementation creates a visitor that walks the AST and identifies matrix-specific operations.
+
+\textbf{Key Parser Features:}
+\begin{itemize}
+    \item Function-based operation extraction (tracks operations per function)
+    \item Pattern recognition for double transpose operations
+    \item Variable tracking across assignments
+    \item Support for matrix literals using `matrix([...])` syntax
+\end{itemize}
+
+The parser implementation (`src/parser.py`) provides:
+
+\begin{lstlisting}[language=Python, caption=Parser Interface]
+# Main parser entry point
+def parse_matrix_program(source_code: str) -> Dict[str, Any]:
+    """Parse .mx source code and extract matrix operations by function."""
+    tree = ast.parse(source_code)
+    extractor = MatrixOperationExtractor()
+    extractor.visit(tree)
+    return extractor.functions  # Returns operations grouped by function
+\end{lstlisting}
+
+\subsection{Part 3: Matrix Operations Dialect}
+
+The matrix dialect defines custom MLIR operations for matrix computations. The implementation uses xDSL's IRDL (IR Definition Language) to define operations with proper type checking and verification.
+
+\textbf{Dialect Operations:}
+\begin{itemize}
+    \item \texttt{matrix.matmul}: Matrix multiplication with dimension compatibility verification
+    \item \texttt{matrix.transpose}: Matrix transpose that swaps row/column dimensions
+    \item \texttt{matrix.add}: Element-wise addition with shape verification
+    \item \texttt{matrix.scalar\_mul}: Scalar multiplication of all matrix elements
+    \item \texttt{matrix.alloc}: Matrix allocation with specified dimensions
+\end{itemize}
+
+\begin{lstlisting}[language=Python, caption=Dialect Structure Overview]
+from xdsl.irdl import (
+    IRDLOperation,
+    irdl_op_definition,
+    irdl_attr_definition,
+    ParametrizedAttribute
+)
+from xdsl.dialects.builtin import Float32Type, IntAttr, TypeAttribute
+
+# Custom matrix type with dimensions and element type
+@irdl_attr_definition
+class MatrixType(ParametrizedAttribute, TypeAttribute):
+    """Type for matrix with known dimensions."""
+    name = "matrix.type"
+    # Parameters: rows, cols, dtype (e.g., !matrix.type<4, 4, f32>)
+
+@irdl_op_definition
+class MatMulOp(IRDLOperation):
+    """Matrix multiplication operation."""
+    name = "matrix.matmul"
+    
+    lhs = operand_def(MatrixType)
+    rhs = operand_def(MatrixType)
+    result = result_def(MatrixType)
+    
+    def __init__(self, lhs: SSAValue, rhs: SSAValue):
+        # Infer result type from operand shapes
+        lhs_type = lhs.type
+        rhs_type = rhs.type
+        result_type = MatrixType(
+            lhs_type.rows.value,
+            rhs_type.cols.value,
+            lhs_type.dtype
+        )
+        super().__init__(
+            operands=[lhs, rhs],
+            result_types=[result_type]
+        )
+    
+    def verify(self):
+        """Verify that matrix dimensions are compatible."""
+        if self.lhs.type.cols.value != self.rhs.type.rows.value:
+            raise ValueError(
+                f"Incompatible matrix dimensions for multiplication: "
+                f"({self.lhs.type.rows.value}x{self.lhs.type.cols.value}) @ "
+                f"({self.rhs.type.rows.value}x{self.rhs.type.cols.value})"
+            )
+
+@irdl_op_definition
+class TransposeOp(IRDLOperation):
+    """Matrix transpose operation."""
+    name = "matrix.transpose"
+    
+    input = operand_def(MatrixType)
+    result = result_def(MatrixType)
+    
+    def __init__(self, input: SSAValue):
+        input_type = input.type
+        # Transpose swaps rows and columns
+        result_type = MatrixType(
+            input_type.cols.value,
+            input_type.rows.value,
+            input_type.dtype
+        )
+        super().__init__(
+            operands=[input],
+            result_types=[result_type]
+        )
+
+@irdl_op_definition
+class ScalarMulOp(IRDLOperation):
+    """Element-wise scalar multiplication."""
+    name = "matrix.scalar_mul"
+    
+    matrix = operand_def(MatrixType)
+    scalar = attr_def(Float32Type)
+    result = result_def(MatrixType)
+    
+    def __init__(self, matrix: SSAValue, scalar: float):
+        super().__init__(
+            operands=[matrix],
+            attributes={'scalar': FloatAttr(scalar, Float32Type())},
+            result_types=[matrix.type]  # Same shape as input
+        )
+
+@irdl_op_definition
+class AddOp(IRDLOperation):
+    """Element-wise matrix addition."""
+    name = "matrix.add"
+    
+    lhs = operand_def(MatrixType)
+    rhs = operand_def(MatrixType)
+    result = result_def(MatrixType)
+    
+    def __init__(self, lhs: SSAValue, rhs: SSAValue):
+        super().__init__(
+            operands=[lhs, rhs],
+            result_types=[lhs.type]  # Same shape as inputs
+        )
+    
+    def verify(self):
+        """Verify that matrices have the same shape."""
+        if (self.lhs.type.rows.value != self.rhs.type.rows.value or
+            self.lhs.type.cols.value != self.rhs.type.cols.value):
+            raise ValueError("Matrix addition requires same dimensions")
+
+@irdl_op_definition
+class AllocOp(IRDLOperation):
+    """Allocate matrix in memory."""
+    name = "matrix.alloc"
+    
+    shape = attr_def(ArrayAttr)
+    result = result_def(MatrixType)
+    
+    def __init__(self, rows: int, cols: int, dtype: TypeAttribute):
+        matrix_type = MatrixType(rows, cols, dtype)
+        super().__init__(
+            operands=[],
+            attributes={'shape': ArrayAttr([IntAttr(rows), IntAttr(cols)])},
+            result_types=[matrix_type]
+        )
+
+class MatrixDialect(Dialect):
+    """Dialect for matrix operations."""
+    name = "matrix"
+    
+    operations = [
+        MatMulOp,
+        TransposeOp,
+        ScalarMulOp,
+        AddOp,
+        AllocOp
+    ]
+\end{lstlisting}
+
+\subsection{Part 4: IR Generation}
+
+Convert the parsed Python AST to your matrix dialect IR:
+
+\begin{lstlisting}[language=Python, caption=src/ir\_generator.py - IR Generation]
+from xdsl.builder import Builder
+from xdsl.dialects import builtin, func
+from xdsl.ir import Block, Region
+from typing import Dict, List, Any
+
+class MatrixIRGenerator:
+    """Generate matrix dialect IR from parsed operations."""
+    
+    def __init__(self):
+        self.builder = Builder()
+        self.var_map: Dict[str, SSAValue] = {}
+    
+    def generate(self, operations: List[Dict[str, Any]]) -> builtin.ModuleOp:
+        """Generate IR module from operations list."""
+        
+        # Create function type (simplified: 2 matrices in, 1 out)
+        func_type = func.FunctionType.from_lists(
+            [MatrixType(None, None, Float32Type()),  # A
+             MatrixType(None, None, Float32Type())], # B
+            [MatrixType(None, None, Float32Type())]  # Result
+        )
+        
+        # Create function
+        with func.FuncOp("matrix_computation", func_type).body as body:
+            # Map parameters to variables
+            self.var_map['A'] = body.block.args[0]
+            self.var_map['B'] = body.block.args[1]
+            
+            # Generate operations
+            for op_info in operations:
+                self.generate_operation(op_info)
+            
+            # Return final result
+            result = self.var_map.get('result', self.var_map['A'])
+            func.Return(result)
+        
+        # Create module
+        return builtin.ModuleOp([body.owner])
+    
+    def generate_operation(self, op_info: Dict[str, Any]):
+        """Generate IR for a single operation."""
+        op_type = op_info['operation']['op']
+        target = op_info['target']
+        
+        if op_type == 'matmul':
+            left = self.var_map[op_info['operation']['left']]
+            right = self.var_map[op_info['operation']['right']]
+            result = MatMulOp(left, right).result
+            self.var_map[target] = result
+        
+        elif op_type == 'transpose':
+            matrix = self.var_map[op_info['operation']['matrix']]
+            result = TransposeOp(matrix).result
+            self.var_map[target] = result
+        
+        elif op_type == 'double_transpose':
+            # This is where optimization opportunity exists!
+            # For now, generate two transposes (will be optimized later)
+            matrix = self.var_map[op_info['operation']['matrix']]
+            temp = TransposeOp(matrix).result
+            result = TransposeOp(temp).result
+            self.var_map[target] = result
+        
+        elif op_type == 'scalar_mul':
+            matrix = self.var_map[op_info['operation']['matrix']]
+            scalar = op_info['operation']['scalar']
+            result = ScalarMulOp(matrix, scalar).result
+            self.var_map[target] = result
+        
+        elif op_type == 'add':
+            left = self.var_map[op_info['operation']['left']]
+            right = self.var_map[op_info['operation']['right']]
+            result = AddOp(left, right).result
+            self.var_map[target] = result
+\end{lstlisting}
+
+\subsection{Part 5: The Optimization Pass}
+
+Implement the double transpose elimination optimization:
+
+\begin{lstlisting}[language=Python, caption=src/middle-end.py - Double Transpose Elimination]
+from xdsl.passes import Pass
+from xdsl.pattern_rewriter import (
+    PatternRewriter,
+    RewritePattern,
+    op_type_rewrite_pattern
+)
+from xdsl.ir import Operation
+from typing import List
+
+class DoubleTransposeElimination(RewritePattern):
+    """Eliminate double transpose patterns: (A^T)^T = A"""
+    
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: TransposeOp, 
+                         rewriter: PatternRewriter) -> None:
+        """Match and eliminate double transpose."""
+        
+        # Check if input to this transpose is also a transpose
+        input_op = op.input.owner
+        
+        if isinstance(input_op, TransposeOp):
+            # Found pattern: transpose(transpose(X)) = X
+            original_matrix = input_op.input
+            
+            # Replace all uses of double transpose with original
+            rewriter.replace_op(op, [original_matrix])
+            
+            # If the intermediate transpose has no other uses, remove it
+            if not input_op.result.uses:
+                rewriter.erase_op(input_op)
+            
+            print(f"Eliminated double transpose: {op}")
+
+class TransposeChainOptimization(Pass):
+    """Optimize chains of transpose operations."""
+    
+    name = "optimize-transpose"
+    
+    def apply(self, module: builtin.ModuleOp) -> None:
+        """Apply transpose optimizations to module."""
+        
+        # Track statistics
+        self.transposes_eliminated = 0
+        
+        # First pass: eliminate obvious double transposes
+        pattern = DoubleTransposeElimination()
+        PatternRewriter(module).apply_pattern(pattern)
+        
+        # Second pass: find hidden transpose chains
+        self.find_transpose_chains(module)
+        
+        # Report results
+        if self.transposes_eliminated > 0:
+            print(f"Eliminated {self.transposes_eliminated} transpose operations")
+    
+    def find_transpose_chains(self, module: builtin.ModuleOp):
+        """Find and optimize transpose chains across assignments."""
+        
+        # Build use-def chains
+        transpose_ops = []
+        for op in module.walk():
+            if isinstance(op, TransposeOp):
+                transpose_ops.append(op)
+        
+        # Analyze patterns
+        for t_op in transpose_ops:
+            if self.can_eliminate_transpose(t_op):
+                self.eliminate_transpose(t_op)
+                self.transposes_eliminated += 1
+    
+    def can_eliminate_transpose(self, op: TransposeOp) -> bool:
+        """Check if transpose can be eliminated."""
+        # Look for patterns where transpose cancels out
+        # This is simplified - you should implement full analysis
+        return False  # TODO: Implement
+    
+    def eliminate_transpose(self, op: TransposeOp):
+        """Eliminate unnecessary transpose."""
+        # TODO: Implement elimination logic
+        pass
+
+class MatrixOptimizationPipeline(Pass):
+    """Complete optimization pipeline for matrix operations."""
+    
+    name = "matrix-opt-pipeline"
+    
+    def apply(self, module: builtin.ModuleOp) -> None:
+        """Apply all matrix optimizations."""
+        
+        passes = [
+            TransposeChainOptimization(),
+            # Add more optimization passes here:
+            # CommonSubexpressionElimination(),
+            # DeadCodeElimination(),
+            # MatrixChainOptimization(),  # Optimal parenthesization
+        ]
+        
+        for opt_pass in passes:
+            opt_pass.apply(module)
+        
+        # Verify IR is still valid
+        module.verify()
+\end{lstlisting}
+
+\subsection{Part 6: Putting It All Together}
+
+Here's the main compiler driver that combines all components:
+
+\begin{lstlisting}[language=Python, caption=compiler.py - Main Compiler Driver]
+#!/usr/bin/env python3
+"""
+Matrix Operations Compiler
+A complete compiler for matrix operations with optimization.
+"""
+
+import sys
+import argparse
+from pathlib import Path
+
+from parser import parse_matrix_program
+from matrix_dialect import MatrixDialect
+from ir_generator import MatrixIRGenerator
+from optimize_transpose import MatrixOptimizationPipeline
+
+from xdsl.context import Context
+from xdsl.printer import Printer
+from xdsl.dialects import builtin, func
+
+class MatrixCompiler:
+    """Main compiler class."""
+    
+    def __init__(self):
+        # Initialize xDSL context
+        self.ctx = Context()
+        self.ctx.load_dialect(builtin.Builtin)
+        self.ctx.load_dialect(func.Func)
+        self.ctx.load_dialect(MatrixDialect)
+        
+        self.printer = Printer()
+    
+    def compile_file(self, input_file: Path, 
+                    output_file: Path = None,
+                    optimize: bool = True) -> builtin.ModuleOp:
+        """Compile a Python file with matrix operations."""
+        
+        print(f"Compiling {input_file}...")
+        
+        # Step 1: Parse Python source
+        with open(input_file, 'r') as f:
+            source_code = f.read()
+        
+        operations = parse_matrix_program(source_code)
+        print(f"Parsed {len(operations)} operations")
+        
+        # Step 2: Generate IR
+        generator = MatrixIRGenerator()
+        module = generator.generate(operations)
+        print("Generated initial IR")
+        
+        if not optimize:
+            print("Skipping optimizations")
+        else:
+            # Step 3: Optimize
+            print("Running optimization passes...")
+            optimizer = MatrixOptimizationPipeline()
+            optimizer.apply(module)
+        
+        # Step 4: Output IR
+        if output_file:
+            with open(output_file, 'w') as f:
+                self.printer.print_op(module, f)
+            print(f"Wrote optimized IR to {output_file}")
+        else:
+            print("\nGenerated IR:")
+            self.printer.print_op(module)
+        
+        return module
+    
+    def verify_optimization(self, original: str, optimized: str):
+        """Verify that optimization preserves semantics."""
+        # TODO: Implement semantic equivalence checking
+        # Could involve:
+        # - Symbolic execution
+        # - Testing with concrete values
+        # - Formal verification
+        pass
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Compile Python matrix operations to optimized IR"
+    )
+    parser.add_argument(
+        'input',
+        help='Input Python file with matrix operations'
+    )
+    parser.add_argument(
+        '-o', '--output',
+        help='Output file for generated IR'
+    )
+    parser.add_argument(
+        '--no-optimize',
+        action='store_true',
+        help='Disable optimizations'
+    )
+    parser.add_argument(
+        '--verbose',
+        action='store_true',
+        help='Verbose output'
+    )
+    
+    args = parser.parse_args()
+    
+    # Create compiler
+    compiler = MatrixCompiler()
+    
+    # Compile the file
+    module = compiler.compile_file(
+        Path(args.input),
+        Path(args.output) if args.output else None,
+        optimize=not args.no_optimize
+    )
+    
+    print("\nCompilation successful!")
+
+if __name__ == "__main__":
+    main()
+\end{lstlisting}
+
+\subsection{Part 7: Testing and Verification}
+
+Testing is crucial for compiler correctness. The implementation should include:
+
+\textbf{Test Strategy:}
+\begin{itemize}
+    \item Unit tests for each compiler phase (parser, dialect, IR generator, optimizer)
+    \item Integration tests with complete `.mx` programs
+    \item Optimization verification tests showing double transpose elimination
+    \item Regression tests for edge cases
+\end{itemize}
+
+\textbf{Example Test Output:}
+\begin{lstlisting}[language=bash, caption=Running the Compiler]
+# Without optimization
+$ matrixc --no-optimize examples/main_input.mx
+Parsed 2 functions with 10 operations
+Generated initial IR
+# Shows IR with double transposes: A.T.T, B.T.T, etc.
+
+# With optimization  
+$ matrixc examples/main_input.mx
+Running optimization passes...
+# Shows optimized IR with transposes eliminated
+\end{lstlisting}
+
+\subsection{Part 8: Project Structure and Implementation}
+
+The complete implementation is available at: \url{https://github.com/djtodoro/matrix-toy-lang}
+
+\textbf{Project Structure:}
+\begin{lstlisting}[caption=Repository Structure]
+matrix-toy-lang/
+├── src/
+│   ├── __init__.py
+│   ├── parser.py          # AST-based parser
+│   ├── dialect.py         # Matrix MLIR dialect
+│   ├── ir_generator.py    # IR generation from AST
+│   └── middle_end.py      # Optimization passes
+├── examples/
+│   └── main_input.mx      # Example input files
+├── compiler.py            # Main driver
+├── pyproject.toml         # Project configuration
+└── README.md             # Documentation
+\end{lstlisting}
+
+\textbf{Installation and Usage:}
+\begin{lstlisting}[language=bash]
+# Setup environment
+python -m venv venv
+source venv/bin/activate
+
+# Install the compiler
+pip install -e .
+
+# Run the compiler
+matrixc examples/main_input.mx           # With optimization
+matrixc --no-optimize examples/main_input.mx  # Without optimization
+\end{lstlisting}
+
+\subsection{Part 9: Lowering to LLVM and Execution}
+
+This crucial step completes your compiler by enabling actual execution of the optimized code on real hardware. You'll lower your custom matrix dialect to LLVM MLIR dialect, then use MLIR tools to generate executable code.
+
+\textbf{Learning Reflection:}
+
+After completing this project, write a short reflection (500 words) addressing:
+\begin{itemize}
+    \item What was the most challenging part of building the compiler?
+    \item How did the optimization change your understanding of compiler design?
+    \item What additional optimizations would you implement with more time?
+    \item How could this compiler be extended for real-world use?
+\end{itemize}
 
 \section{Conclusion: Your Journey Forward}
 
