@@ -155,8 +155,9 @@ Frameworks / frontends
 
 \subsection{A Visual Mental Model}
 
-\begin{figure}[h]
+\begin{figure}[htbp]
 \centering
+\resizebox{0.98\textwidth}{!}{%
 \begin{tikzpicture}[
   node distance=10mm and 8mm,
   box/.style={draw, rounded corners, align=center, minimum width=28mm, minimum height=9mm, fill=blue!5},
@@ -183,6 +184,7 @@ Frameworks / frontends
 \draw[arrow] (vmfb) -- (runtime);
 \draw[arrow] (runtime) -- (device);
 \end{tikzpicture}
+}
 \caption{A beginner-friendly view of the IREE compiler and runtime stack.}
 \end{figure}
 
@@ -208,6 +210,36 @@ Once this clicks, many IREE terms become easier to place.
     \item[Dispatch] A unit of executable work handed to a device.
     \item[HAL] Hardware Abstraction Layer. The layer that hides device-specific details behind a common interface.
 \end{description}
+
+\section{How IREE Relates to MLIR and xDSL}
+
+This repository already contains xDSL material, so it helps to place IREE relative to both MLIR and xDSL.
+
+\subsection{MLIR, xDSL, and IREE in One View}
+
+\begin{itemize}
+    \item \textbf{MLIR} is the compiler infrastructure and IR framework.
+    \item \textbf{xDSL} is a Python-native infrastructure inspired by MLIR and useful for learning, prototyping, and experimenting with compiler ideas.
+    \item \textbf{IREE} is a production-oriented compiler and runtime stack built on MLIR for deploying tensor programs.
+\end{itemize}
+
+\subsection{A Useful Mental Separation}
+
+\begin{description}
+    \item[xDSL mindset] Build and understand compiler ideas quickly, often in Python, with explicit IR objects and passes you can inspect easily.
+    \item[IREE mindset] Take a real tensor program, lower it through a serious deployment pipeline, package it, and execute it on actual hardware through a runtime.
+\end{description}
+
+\subsection{Why This Matters for Learning}
+
+If you already understand xDSL's representation-and-transformation model, you have a good base for reading IREE:
+\begin{itemize}
+    \item both rely on explicit IR,
+    \item both reward inspecting intermediate states,
+    \item both make passes and dialect boundaries visible.
+\end{itemize}
+
+The difference is mainly \textbf{scope}. xDSL is excellent for learning and experimentation. IREE continues from those compiler ideas into concrete deployment and runtime execution.
 
 \section{Compiler Stages You Should Recognize}
 
@@ -329,6 +361,80 @@ python -m pip install iree-base-compiler iree-base-runtime
 \texttt{iree-check-module} & Runs check-style tests embedded in compiled modules. \\
 \hline
 \texttt{iree-run-mlir} & Compiles and runs an MLIR file directly for testing and debugging. \\
+\hline
+\end{tabular}
+
+\section{How To Read an IREE Command Line}
+
+One reason IREE feels difficult at first is that the commands are dense. They become much easier once you read them as answers to a few fixed questions.
+
+\subsection{Reading a Compile Command}
+
+Consider this example:
+
+\begin{lstlisting}[caption=An annotated compile command]
+iree-compile \
+  --iree-hal-target-device=local \
+  --iree-hal-local-target-device-backends=llvm-cpu \
+  --iree-llvmcpu-target-cpu=host \
+  simple_abs.mlir \
+  -o simple_abs_cpu.vmfb
+\end{lstlisting}
+
+Read it like this:
+\begin{enumerate}
+    \item \textbf{What is the input?} \texttt{simple\_abs.mlir}
+    \item \textbf{What device family am I targeting?} \texttt{local}
+    \item \textbf{What executable backend do I want?} \texttt{llvm-cpu}
+    \item \textbf{How should CPU code be tuned?} \texttt{host}
+    \item \textbf{Where does the artifact go?} \texttt{simple\_abs\_cpu.vmfb}
+\end{enumerate}
+
+\subsection{Reading a Run Command}
+
+Now consider the matching runtime command:
+
+\begin{lstlisting}[caption=An annotated run command]
+iree-run-module \
+  --module=simple_abs_cpu.vmfb \
+  --device=local-task \
+  --function=abs \
+  --input=f32=-2
+\end{lstlisting}
+
+Read it like this:
+\begin{enumerate}
+    \item \textbf{What module am I loading?}
+    \item \textbf{What runtime device should execute it?}
+    \item \textbf{What exported function should be called?}
+    \item \textbf{What inputs should be passed?}
+\end{enumerate}
+
+\subsection{The Two Questions Beginners Mix Up}
+
+Do not confuse these:
+\begin{itemize}
+    \item \texttt{--iree-hal-local-target-device-backends=llvm-cpu}: compile-time code generation choice.
+    \item \texttt{--device=local-task}: runtime execution device choice.
+\end{itemize}
+
+The first changes what gets emitted. The second changes how the already-compiled module is executed.
+
+\subsection{A Tiny Backend Cheat Sheet}
+
+\begin{tabular}{|l|p{3.1cm}|p{6cm}|}
+\hline
+\textbf{Backend} & \textbf{Good first use} & \textbf{Beginner note} \\
+\hline
+\texttt{vmvx} & Reference execution and learning & Simple and portable, but not the fast path. \\
+\hline
+\texttt{llvm-cpu} & Real CPU deployment & Usually pair with \texttt{--iree-llvmcpu-target-cpu=host}. \\
+\hline
+\texttt{vulkan-spirv} & Vulkan-capable GPUs & Requires a working Vulkan runtime stack. \\
+\hline
+\texttt{cuda} & NVIDIA GPUs & Runtime device must also support CUDA. \\
+\hline
+\texttt{rocm} or \texttt{hip} & AMD GPUs & Platform-specific setup matters. \\
 \hline
 \end{tabular}
 
@@ -641,6 +747,70 @@ Examples:
 
 If you mix these up, many IREE command lines stop making sense.
 
+\section{Runtime Building Blocks}
+
+Once you move past the first few CLI examples, the runtime becomes much easier to understand if you know its core objects.
+
+\subsection{Driver}
+
+The driver is the top-level runtime entry point for a device family. It is responsible for discovering devices and creating device instances.
+
+\begin{quote}
+Think of the driver as the runtime-side bridge between ``I know I want Vulkan or local CPU'' and ``give me an actual device object I can use''.
+\end{quote}
+
+\subsection{Device}
+
+The device is the execution surface. Command buffers are submitted to devices, buffers are allocated through device-associated allocators, and synchronization is observed at this level.
+
+For beginners, the most visible devices are:
+\begin{itemize}
+    \item \texttt{local-sync}
+    \item \texttt{local-task}
+    \item GPU-facing devices such as \texttt{vulkan} or \texttt{cuda}
+\end{itemize}
+
+\subsection{Allocator and Buffers}
+
+Tensor data eventually lives in buffers managed by HAL allocators. A buffer may live in host-visible memory, device-local memory, or some combination depending on the backend.
+
+This matters because a lot of ``why is this runtime code so large?'' questions reduce to:
+\begin{itemize}
+    \item where does the data live,
+    \item who is allowed to see it,
+    \item when is movement or mapping required.
+\end{itemize}
+
+\subsection{Command Buffer}
+
+A command buffer records work to be executed later. In IREE this includes dispatches, transfers, and synchronization-related operations.
+
+If you have seen Vulkan before, this concept should feel familiar. If not, use this shortcut:
+
+\begin{quote}
+A command buffer is a recorded plan for device work, not the work itself.
+\end{quote}
+
+\subsection{Executable}
+
+An executable is the compiled device-facing payload. It may come from LLVM CPU code generation, SPIR-V, CUDA-related lowering, or other backend-specific formats.
+
+The runtime does not ``re-derive'' the math from scratch. It loads executable payloads that the compiler already produced.
+
+\subsection{Semaphores and Fences}
+
+These are synchronization tools:
+\begin{itemize}
+    \item \textbf{semaphores} coordinate ordering across submissions and device work,
+    \item \textbf{fences} help coordinate between host and device completion points.
+\end{itemize}
+
+You do not need to implement them to benefit from them. You only need to understand that correct execution on asynchronous systems requires explicit ordering.
+
+\subsection{Why This Section Matters}
+
+When you later read files under \texttt{runtime/src/iree/hal/}, you will keep seeing the same nouns: driver, device, allocator, command buffer, executable, semaphore. Learning those nouns early makes the runtime code much less intimidating.
+
 \section{VMFB and IREE Modules}
 
 \subsection{What a VMFB Is}
@@ -810,6 +980,31 @@ gdb --args ./iree-build/tools/iree-run-module \
     \item Dump the module with \texttt{iree-dump-module}.
     \item Dump compiler phases with \texttt{--dump-compilation-phases-to}.
     \item Switch from \texttt{local-task} to \texttt{local-sync} when you need a clearer execution story.
+\end{enumerate}
+
+\section{Troubleshooting Checklist}
+
+When something fails in IREE, the fastest path is usually to classify the failure before changing random flags.
+
+\begin{description}
+    \item[``Device not found'' or ``driver not available''] Run \texttt{iree-run-module --list\_drivers} and \texttt{--list\_devices}. Confirm that your runtime was built with the driver you expect.
+    \item[``Function not found''] Use \texttt{iree-dump-module} and verify the exported function name.
+    \item[Shape or type mismatch] Compare your \texttt{--input=} flags against the function signature in the source MLIR or dumped module.
+    \item[CPU result is correct but unexpectedly slow] Rebuild or recompile with \texttt{--iree-llvmcpu-target-cpu=host}. Also make sure you are not benchmarking \texttt{vmvx} by accident.
+    \item[Execution is hard to follow] Switch from \texttt{local-task} to \texttt{local-sync} and rerun under a debugger.
+    \item[Compiler pipeline feels opaque] Use \texttt{--dump-compilation-phases-to=} and compare \texttt{flow}, \texttt{stream}, \texttt{hal}, and \texttt{vm}.
+\end{description}
+
+\subsection{A Good Investigation Order}
+
+For most beginner issues, this order works well:
+\begin{enumerate}
+    \item verify the source MLIR,
+    \item compile with explicit backend flags,
+    \item dump the module,
+    \item run with explicit device selection,
+    \item switch to \texttt{local-sync} if needed,
+    \item only then start reading runtime internals.
 \end{enumerate}
 
 \section{Common Beginner Mistakes}
