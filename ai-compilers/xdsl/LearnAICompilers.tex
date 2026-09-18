@@ -36,6 +36,8 @@
 }
 
 \lstset{style=pythonstyle}
+\lstdefinelanguage{MLIR}{morekeywords={func,module,memref,scf,linalg,tensor,arith,affine,vector},sensitive=true,morecomment=[l]{//}}
+
 
 \title{Learn Compiler Design Through xDSL:\\
 A Practical Course for AI/ML Engineers}
@@ -307,38 +309,31 @@ Why SSA matters:
 
 \subsection{Your First xDSL Program}
 
+\noindent\textit{Note: all code examples in this document have been updated for xDSL version 0.71.0. If an example does not work when you read this, check the current function and class signatures, as the xDSL API changes between releases.}
+
 Let's create a simple IR program using xDSL:
 
 \begin{lstlisting}[language=Python, caption=Creating IR in xDSL]
-from xdsl.context import Context
-from xdsl.dialects import builtin, arith, func
-from xdsl.ir import Operation, Block, Region
-from xdsl.builder import Builder
+from xdsl.dialects import arith, func
+from xdsl.dialects.builtin import i32, FunctionType, ModuleOp
+from xdsl.builder import ImplicitBuilder
 
-# Create a context (like a namespace for dialects)
-ctx = Context()
-ctx.load_dialect(builtin.Builtin)
-ctx.load_dialect(arith.Arith)
-ctx.load_dialect(func.Func)
+# 1) an empty module
+module = ModuleOp([])
 
-# Build a simple function that adds two numbers
-@Builder.implicit_region
-def create_add_function():
+# 2) open the module body and build inside it
+with ImplicitBuilder(module.body):
     # Create function signature: (i32, i32) -> i32
-    func_type = func.FunctionType.from_lists([builtin.i32, builtin.i32], [builtin.i32])
-    
-    with func.FuncOp("add", func_type, visibility="public").body:
-        # Get function arguments
-        arg0 = Block.current().args[0]
-        arg1 = Block.current().args[1]
-        
-        # Create add operation
-        result = arith.Addi(arg0, arg1).result
-        
-        # Return the result
-        func.Return(result)
+    func_type = FunctionType.from_lists([i32, i32], [i32])
+    add = func.FuncOp("add", func_type)
 
-module = builtin.ModuleOp([create_add_function()])
+    # 3) open the function body; `as (...)` yields the block arguments
+    with ImplicitBuilder(add.body) as (arg0, arg1):
+        # Create add operation
+        result = arith.AddiOp(arg0, arg1)
+        # Return the result
+        func.ReturnOp(result)
+
 print(module)
 \end{lstlisting}
 
@@ -388,41 +383,40 @@ An operation in xDSL is the fundamental unit of computation. Each operation:
 Let's define a custom operation for matrix operations:
 
 \begin{lstlisting}[language=Python, caption=Defining Custom Operations]
-from xdsl.irdl import (
-    IRDLOperation, 
-    OpResult, 
-    Operand, 
-    OperandDef, 
-    ResultDef,
-    op_def,
-    result_def
-)
+from xdsl.ir import Dialect, SSAValue
+from xdsl.irdl import irdl_op_definition, IRDLOperation, operand_def, result_def
 from xdsl.dialects.builtin import TensorType
+from xdsl.utils.exceptions import VerifyException
 
-@op_def
+def infer_matmul_type(lhs: SSAValue, rhs: SSAValue) -> TensorType:
+    m, _ = lhs.type.get_shape()      # (M, K)
+    _, n = rhs.type.get_shape()      # (K, N)
+    return TensorType(lhs.type.element_type, [m, n])   # -> (M, N)
+
+@irdl_op_definition
 class MatMulOp(IRDLOperation):
     """Matrix multiplication operation"""
     name = "my_dialect.matmul"
-    
+
     # Define operands (inputs)
     lhs = operand_def(TensorType)
     rhs = operand_def(TensorType)
-    
+
     # Define results (outputs)
     result = result_def(TensorType)
-    
-    def __init__(self, lhs: Value, rhs: Value):
-        super().__init__(operands=[lhs, rhs], 
-                        result_types=[infer_matmul_type(lhs, rhs)])
-    
-    def verify(self):
+
+    def __init__(self, lhs: SSAValue, rhs: SSAValue):
+        super().__init__(operands=[lhs, rhs],
+                         result_types=[infer_matmul_type(lhs, rhs)])
+
+    def verify_(self):
         """Verify that the operation is well-formed"""
         # Check that dimensions are compatible
-        lhs_shape = self.lhs.type.shape
-        rhs_shape = self.rhs.type.shape
-        
+        lhs_shape = self.lhs.type.get_shape()
+        rhs_shape = self.rhs.type.get_shape()
+
         if lhs_shape[-1] != rhs_shape[0]:
-            raise ValueError("Incompatible matrix dimensions")
+            raise VerifyException("Incompatible matrix dimensions")
 \end{lstlisting}
 
 \subsection{Operation Semantics}
@@ -431,17 +425,17 @@ Every operation has well-defined semantics - what it means to execute that opera
 
 \begin{lstlisting}[language=Python, caption=Operation Semantics Example]
 # Arithmetic operations
-add_op = arith.Addi(a, b)  # result = a + b
-mul_op = arith.Muli(a, b)  # result = a * b
+add_op = arith.AddiOp(a, b)       # result = a + b
+mul_op = arith.MuliOp(a, b)       # result = a * b
 
-# Memory operations  
-alloc_op = memref.Alloc.get(shape=[10, 20], element_type=f32)  # Allocate 10x20 array
-load_op = memref.Load.get(memref_value, indices)  # Load from memory
-store_op = memref.Store.get(value, memref_value, indices)  # Store to memory
+# Memory operations
+alloc_op = memref.AllocOp([], [], MemRefType(f32, [10, 20]))  # allocate 10x20 array
+load_op  = memref.LoadOp.get(memref_value, indices)          # load from memory
+store_op = memref.StoreOp.get(value, memref_value, indices)  # store to memory
 
 # Control flow operations
-for_op = scf.For(lower_bound, upper_bound, step) # for loop
-if_op = scf.If(condition, has_else=True)  # if-then-else
+for_op = scf.ForOp(lower_bound, upper_bound, step, [])       # for loop
+if_op  = scf.IfOp(condition, [result_types], true_region)    # if-then-else
 \end{lstlisting}
 
 \subsection{Attributes vs Operands}
@@ -455,13 +449,13 @@ Understanding the difference between attributes and operands is crucial:
 
 \begin{lstlisting}[language=Python, caption=Attributes vs Operands]
 # Constant has an attribute (the value)
-const = arith.Constant.from_int_and_width(42, 32)  # 42 is an attribute
+const = arith.ConstantOp.from_int_and_width(42, 32)  # 42 is an attribute
 
 # Add has operands (runtime values)
-result = arith.Addi(x, y)  # x and y are operands
+result = arith.AddiOp(x, y)  # x and y are operands
 
-# Alloc has attributes (shape) but no operands
-mem = memref.Alloc.get(shape=[100], element_type=f32)  # shape is attribute
+# Alloc has attributes (shape) but no data operands
+mem = memref.AllocOp([], [], MemRefType(f32, [100]))  # shape is attribute
 \end{lstlisting}
 
 \section{Chapter 3: Analysis Passes}
@@ -481,27 +475,28 @@ Analysis passes extract information from IR without modifying it. They answer qu
 Let's write an analysis that counts operations by type:
 
 \begin{lstlisting}[language=Python, caption=Operation Counter Analysis]
-from xdsl.passes import Pass
-from xdsl.ir import Operation, OpResult
+from xdsl.context import Context
+from xdsl.passes import ModulePass
+from xdsl.dialects import builtin
 from collections import defaultdict
 
-class OperationCounterPass(Pass):
+class OperationCounterPass(ModulePass):
     """Count operations by type in the IR"""
-    
+
     name = "count-ops"
-    
-    def apply(self, module: builtin.ModuleOp) -> None:
+
+    def apply(self, ctx: Context, module: builtin.ModuleOp) -> None:
         op_counts = defaultdict(int)
-        
+
         # Walk through all operations in the module
         for op in module.walk():
             op_counts[op.name] += 1
-        
+
         # Print analysis results
         print("Operation counts:")
         for op_name, count in sorted(op_counts.items()):
             print(f"  {op_name}: {count}")
-        
+
         # Store results for use by other passes
         self.op_counts = op_counts
 \end{lstlisting}
@@ -511,16 +506,23 @@ class OperationCounterPass(Pass):
 Use-Def chains track where values are defined and used:
 
 \begin{lstlisting}[language=Python, caption=Use-Def Analysis]
-class UseDefAnalysis(Pass):
+from xdsl.context import Context
+from xdsl.passes import ModulePass
+from xdsl.dialects import builtin
+from xdsl.ir import OpResult
+
+class UseDefAnalysis(ModulePass):
     """Analyze use-def relationships"""
-    
-    def apply(self, module: builtin.ModuleOp) -> None:
+
+    name = "use-def"
+
+    def apply(self, ctx: Context, module: builtin.ModuleOp) -> None:
         # Build use-def chains
         for op in module.walk():
             for result in op.results:
                 print(f"Value {result} defined by {op.name}")
                 print(f"  Used by: {[use.operation.name for use in result.uses]}")
-    
+
     def find_unused_values(self, module: builtin.ModuleOp) -> list[OpResult]:
         """Find values that are never used"""
         unused = []
@@ -536,22 +538,30 @@ class UseDefAnalysis(Pass):
 Dominance tells us which operations must execute before others:
 
 \begin{lstlisting}[language=Python, caption=Dominance Analysis]
-from xdsl.ir import Block
+from xdsl.context import Context
+from xdsl.passes import ModulePass
+from xdsl.dialects import builtin, func
 from xdsl.irdl.dominance import DominanceInfo
 
-class DominanceAnalysis(Pass):
-    """Analyze control flow dominance"""
-    
-    def apply(self, module: builtin.ModuleOp) -> None:
+class DominanceAnalysis(ModulePass):
+    """Analyze control flow dominance."""
+
+    name = "dominance"
+
+    def apply(self, ctx: Context, module: builtin.ModuleOp) -> None:
         # For each function in the module
         for func_op in module.body.ops:
             if isinstance(func_op, func.FuncOp):
-                dom_info = DominanceInfo(func_op.body)
-                
-                # Check dominance relationships
-                for block in func_op.body.blocks:
-                    dominators = dom_info.get_dominators(block)
-                    print(f"Block {block} dominated by: {dominators}")
+                # DominanceInfo works on a region and answers block-level
+                # dominance queries: dominates(a, b) / strictly_dominates(a, b).
+                dom = DominanceInfo(func_op.body)
+                blocks = list(func_op.body.blocks)
+                names = {b: f"bb{i}" for i, b in enumerate(blocks)}
+
+                # For each block, list the blocks that dominate it
+                for b in blocks:
+                    dominators = [names[a] for a in blocks if dom.dominates(a, b)]
+                    print(f"Block {names[b]} dominated by: {dominators}")
 \end{lstlisting}
 
 \subsection{Dataflow Analysis}
@@ -559,32 +569,39 @@ class DominanceAnalysis(Pass):
 Dataflow analysis propagates information through the program:
 
 \begin{lstlisting}[language=Python, caption=Constant Propagation Analysis]
-class ConstantPropagationAnalysis(Pass):
+from xdsl.context import Context
+from xdsl.passes import ModulePass
+from xdsl.dialects import builtin, arith
+
+class ConstantPropagationAnalysis(ModulePass):
     """Analyze which values are compile-time constants"""
-    
-    def apply(self, module: builtin.ModuleOp) -> None:
+
+    name = "const-prop"
+
+    def apply(self, ctx: Context, module: builtin.ModuleOp) -> None:
         known_constants = {}
-        
+ 
         # First pass: identify constants
+        # (op.result is used as an SSA-value key; op.value.value.data is the int)
         for op in module.walk():
-            if isinstance(op, arith.Constant):
-                known_constants[op.result] = op.value.value
+            if isinstance(op, arith.ConstantOp):
+                known_constants[op.result] = op.value.value.data
         
         # Iteratively propagate constants
         changed = True
         while changed:
             changed = False
             for op in module.walk():
-                if isinstance(op, arith.Addi):
+                if isinstance(op, arith.AddiOp):
                     # If both operands are known constants
-                    if (op.lhs in known_constants and 
-                        op.rhs in known_constants):
-                        result_value = (known_constants[op.lhs] + 
-                                      known_constants[op.rhs])
+                    if (op.lhs in known_constants and
+                            op.rhs in known_constants):
+                        result_value = (known_constants[op.lhs] +
+                                        known_constants[op.rhs])
                         if op.result not in known_constants:
                             known_constants[op.result] = result_value
                             changed = True
-        
+
         return known_constants
 \end{lstlisting}
 
@@ -606,29 +623,32 @@ Key principles:
 xDSL provides powerful pattern matching for transformations:
 
 \begin{lstlisting}[language=Python, caption=Simple Algebraic Optimization]
+from xdsl.dialects import arith
 from xdsl.pattern_rewriter import (
-    PatternRewriter, 
+    PatternRewriter,
     RewritePattern,
-    op_type_rewrite_pattern
+    op_type_rewrite_pattern,
 )
 
 class FoldAddZero(RewritePattern):
     """Fold x + 0 -> x"""
-    
+
     @op_type_rewrite_pattern
-    def match_and_rewrite(self, op: arith.Addi, 
-                         rewriter: PatternRewriter) -> None:
+    def match_and_rewrite(self, op: arith.AddiOp,
+                          rewriter: PatternRewriter) -> None:
         # Check if right operand is zero
-        if isinstance(op.rhs.owner, arith.Constant):
-            if op.rhs.owner.value.value == 0:
+        if isinstance(op.rhs.owner, arith.ConstantOp):
+            if op.rhs.owner.value.value.data == 0:
                 # Replace all uses of the add with the left operand
-                rewriter.replace_op(op, [op.lhs])
+                rewriter.replace_all_uses_with(op.result, op.lhs)
+                rewriter.erase(op)
                 return
-        
-        # Check if left operand is zero  
-        if isinstance(op.lhs.owner, arith.Constant):
-            if op.lhs.owner.value.value == 0:
-                rewriter.replace_op(op, [op.rhs])
+
+        # Check if left operand is zero
+        if isinstance(op.lhs.owner, arith.ConstantOp):
+            if op.lhs.owner.value.value.data == 0:
+                rewriter.replace_all_uses_with(op.result, op.rhs)
+                rewriter.erase(op)
 \end{lstlisting}
 
 \subsection{Common Optimizations}
@@ -638,31 +658,49 @@ class FoldAddZero(RewritePattern):
 Remove operations whose results are never used:
 
 \begin{lstlisting}[language=Python, caption=Dead Code Elimination]
-class DeadCodeElimination(Pass):
+from xdsl.context import Context
+from xdsl.passes import ModulePass
+from xdsl.dialects import builtin, memref, func
+from xdsl.ir import Operation
+
+class DeadCodeElimination(ModulePass):
     """Remove unused operations"""
-    
-    def apply(self, module: builtin.ModuleOp) -> None:
-        ops_to_remove = []
-        
-        for op in module.walk():
-            # Skip operations with side effects
-            if self.has_side_effects(op):
-                continue
+
+    name = "my-dce"
+
+    def apply(self, ctx: Context, module: builtin.ModuleOp) -> None:
+        # Iterate to a fixpoint: removing a dead op can make its operands dead.
+        changed = True
+        while changed:
+            changed = False
+            ops_to_remove = []
+
+            for op in module.walk():
+                # Skip operations with side effects
+                if self.has_side_effects(op):
+                    continue
                 
-            # Check if any results are used
-            all_dead = all(not result.uses for result in op.results)
-            
-            if all_dead:
-                ops_to_remove.append(op)
-        
-        # Remove dead operations
-        for op in ops_to_remove:
-            op.erase()
-    
+                # IMPORTANT: only consider ops that actually PRODUCE a value.
+                # all(...) over an empty result list is True, so without this
+                # guard we would wrongly delete result-less ops such as
+                # func.return, func.func and the module itself.
+                if not op.results:
+                    continue
+ 
+                # Dead if none of its results are used
+                if all(not result.uses for result in op.results):
+                    ops_to_remove.append(op)
+ 
+            # Remove dead operations
+            for op in ops_to_remove:
+                op.detach()
+                op.erase()
+                changed = True
+ 
     def has_side_effects(self, op: Operation) -> bool:
         """Check if operation has side effects"""
         # Memory writes, function calls, etc.
-        return isinstance(op, (memref.Store, func.Call))
+        return isinstance(op, (memref.StoreOp, func.CallOp))
 \end{lstlisting}
 
 \subsubsection{Common Subexpression Elimination}
@@ -670,30 +708,51 @@ class DeadCodeElimination(Pass):
 Identify and eliminate redundant computations:
 
 \begin{lstlisting}[language=Python, caption=Common Subexpression Elimination]
-class CommonSubexpressionElimination(Pass):
+from xdsl.context import Context
+from xdsl.passes import ModulePass
+from xdsl.dialects import builtin
+from xdsl.ir import Operation
+from xdsl.traits import Pure
+
+class CommonSubexpressionElimination(ModulePass):
     """Eliminate redundant computations"""
-    
-    def apply(self, module: builtin.ModuleOp) -> None:
-        # Map from (op_type, operands) to result
+
+    name = "my-cse"
+
+    def apply(self, ctx: Context, module: builtin.ModuleOp) -> None:
+        # Map from expression key to the SSA value that first produced it.
         expression_map = {}
-        
-        for op in module.walk():
+
+        for op in list(module.walk()):
             if self.is_pure(op):
-                # Create a key for this expression
+                # Key for this expression
                 key = self.get_expression_key(op)
-                
+
                 if key in expression_map:
-                    # Found duplicate - replace with existing
-                    existing_result = expression_map[key]
-                    op.results[0].replace_by(existing_result)
+                    # Duplicate found: reuse the earlier result, drop this op.
+                    # NB: in straight-line code the first occurrence dominates
+                    # later ones; a general CSE would check dominance here.
+                    op.results[0].replace_all_uses_with(expression_map[key])
+                    op.detach()
                     op.erase()
                 else:
-                    # First occurrence - remember it
                     expression_map[key] = op.results[0]
     
+    def is_pure(self, op: Operation) -> bool:
+        # Only fold value-producing ops with no side effects.
+        return bool(op.results) and op.has_trait(Pure)
+    
     def get_expression_key(self, op: Operation):
-        """Create hashable key for expression"""
-        return (op.name, tuple(op.operands))
+        """Create a hashable key for the expression.
+
+        Must include attributes AND properties, not just operands: otherwise
+        two different constants (e.g. `constant 5` and `constant 7`, both with
+        no operands) would collide and be wrongly merged.
+        """
+        return (op.name,
+                tuple(op.operands),
+                tuple(sorted(op.attributes.items())),
+                tuple(sorted(op.properties.items())))
 \end{lstlisting}
 
 \subsubsection{Loop Optimizations}
@@ -701,29 +760,35 @@ class CommonSubexpressionElimination(Pass):
 Optimize loop structures for better performance:
 
 \begin{lstlisting}[language=Python, caption=Loop Unrolling]
-class LoopUnrolling(Pass):
+from xdsl.context import Context
+from xdsl.passes import ModulePass
+from xdsl.dialects import builtin, scf, arith
+
+class LoopUnrolling(ModulePass):
     """Unroll small loops"""
-    
-    def apply(self, module: builtin.ModuleOp) -> None:
+
+    name = "loop-unroll"
+
+    def apply(self, ctx: Context, module: builtin.ModuleOp) -> None:
         for op in module.walk():
-            if isinstance(op, scf.For):
+            if isinstance(op, scf.ForOp):
                 if self.should_unroll(op):
                     self.unroll_loop(op)
     
-    def should_unroll(self, loop: scf.For) -> bool:
+    def should_unroll(self, loop: scf.ForOp) -> bool:
         """Decide if loop should be unrolled"""
         # Get loop bounds if constant
-        if (isinstance(loop.lb.owner, arith.Constant) and
-            isinstance(loop.ub.owner, arith.Constant)):
-            lb = loop.lb.owner.value.value
-            ub = loop.ub.owner.value.value
+        if (isinstance(loop.lb.owner, arith.ConstantOp) and
+                isinstance(loop.ub.owner, arith.ConstantOp)):
+            lb = loop.lb.owner.value.value.data
+            ub = loop.ub.owner.value.value.data
             iterations = ub - lb
-            
+
             # Unroll small loops
             return iterations <= 4
         return False
     
-    def unroll_loop(self, loop: scf.For):
+    def unroll_loop(self, loop: scf.ForOp):
         """Completely unroll a loop"""
         # Clone loop body for each iteration
         # Update induction variable references
@@ -736,47 +801,81 @@ class LoopUnrolling(Pass):
 Lowering transforms high-level operations into simpler ones:
 
 \begin{lstlisting}[language=Python, caption=Lowering High-Level Operations]
-class LowerMatrixOps(Pass):
-    """Lower matrix operations to loops"""
-    
-    def apply(self, module: builtin.ModuleOp) -> None:
-        for op in module.walk():
+from xdsl.context import Context
+from xdsl.passes import ModulePass
+from xdsl.dialects import builtin, arith, memref, scf
+from xdsl.dialects.builtin import (MemRefType, f32, IndexType,
+    IntegerAttr, FloatAttr)
+from xdsl.builder import ImplicitBuilder, Builder, InsertPoint
+
+class LowerMatrixOps(ModulePass):
+    """Lower matrix operations to loops.
+
+    Assumes a memref-based MatMulOp: (MxK) @ (KxN) -> (MxN).
+    """
+
+    name = "lower-matmul"
+
+    def apply(self, ctx: Context, module: builtin.ModuleOp) -> None:
+        for op in list(module.walk()):
             if isinstance(op, MatMulOp):
                 self.lower_matmul(op)
     
     def lower_matmul(self, matmul: MatMulOp):
-        """Lower matmul to three nested loops"""
-        builder = Builder.before(matmul)
-        
+        """Lower matmul to three nested loops."""
+        A, B = matmul.lhs, matmul.rhs
+ 
         # Get dimensions
-        m, k = matmul.lhs.type.shape
-        _, n = matmul.rhs.type.shape
-        
-        # Allocate result
-        result = builder.insert(memref.Alloc.get([m, n], f32))
-        
-        # Generate three nested loops
-        with builder.insert(scf.For(0, m, 1)) as i:
-            with builder.insert(scf.For(0, n, 1)) as j:
-                # Initialize accumulator
-                zero = builder.insert(arith.Constant.from_float(0.0, f32))
-                
-                with builder.insert(scf.For(0, k, 1, [zero])) as (k_idx, acc):
-                    # Load elements
-                    a_elem = builder.insert(memref.Load(matmul.lhs, [i, k_idx]))
-                    b_elem = builder.insert(memref.Load(matmul.rhs, [k_idx, j]))
+        m, k = A.type.get_shape()
+        _, n = B.type.get_shape()
+        idx = IndexType()
+
+        # Build the loop nest just before the matmul op
+        with ImplicitBuilder(Builder(InsertPoint.before(matmul))):
+            c0 = arith.ConstantOp(IntegerAttr(0, idx))
+            c1 = arith.ConstantOp(IntegerAttr(1, idx))
+            cM = arith.ConstantOp(IntegerAttr(m, idx))
+            cN = arith.ConstantOp(IntegerAttr(n, idx))
+            cK = arith.ConstantOp(IntegerAttr(k, idx))
+            zero = arith.ConstantOp(FloatAttr(0.0, f32))
+
+            # Allocate result
+            C = memref.AllocOp.get(matmul.result.type.element_type,
+                                   shape=[m, n])
+            
+            # Outer loop over i
+            @Builder.implicit_region((idx,))
+            def i_body(i_args):
+                (i,) = i_args
+
+                # Middle loop over j
+                @Builder.implicit_region((idx,))
+                def j_body(j_args):
+                    (j,) = j_args
+
+                    # Inner loop over k with an accumulator (iter_arg)
+                    @Builder.implicit_region((idx, f32))
+                    def k_body(k_args):
+                        (kk, acc) = k_args
+                        a_elem = memref.LoadOp.get(A, [i, kk])
+                        b_elem = memref.LoadOp.get(B, [kk, j])
+                        prod = arith.MulfOp(a_elem, b_elem)
+                        new_acc = arith.AddfOp(acc, prod)
+                        scf.YieldOp(new_acc)
                     
-                    # Multiply and accumulate
-                    prod = builder.insert(arith.Mulf(a_elem, b_elem))
-                    new_acc = builder.insert(arith.Addf(acc, prod))
-                    
-                    scf.Yield(new_acc)
+                    k_loop = scf.ForOp(c0, cK, c1, [zero], k_body)
+                    # Store the accumulated result
+                    memref.StoreOp.get(k_loop.results[0], C, [i, j])
+                    scf.YieldOp()
                 
-                # Store result
-                builder.insert(memref.Store(acc, result, [i, j]))
+                scf.ForOp(c0, cN, c1, [], j_body)
+                scf.YieldOp()
+
+            scf.ForOp(c0, cM, c1, [], i_body)
         
-        # Replace matmul with lowered result
-        matmul.results[0].replace_by(result)
+        # Replace matmul with the lowered result buffer, then remove it
+        matmul.result.replace_all_uses_with(C.results[0])
+        matmul.detach()
         matmul.erase()
 \end{lstlisting}
 
@@ -788,7 +887,10 @@ Let's build a complete compiler for arithmetic expressions:
 
 \begin{lstlisting}[language=Python, caption=Expression Compiler]
 from dataclasses import dataclass
-from typing import Union
+
+from xdsl.dialects import arith, func
+from xdsl.dialects.builtin import i32, FunctionType, ModuleOp
+from xdsl.ir import SSAValue
 
 # Define AST nodes
 @dataclass
@@ -799,7 +901,7 @@ class Expr:
 class Number(Expr):
     value: int
 
-@dataclass  
+@dataclass
 class BinaryOp(Expr):
     left: Expr
     op: str
@@ -813,34 +915,31 @@ def parse(text: str) -> Expr:
 
 # IR Generator
 class ExprIRGen:
-    def __init__(self):
-        self.builder = Builder()
-        
-    def compile(self, expr: Expr) -> OpResult:
+    def compile(self, expr: Expr) -> SSAValue:
         """Compile expression to xDSL IR"""
         if isinstance(expr, Number):
-            return arith.Constant.from_int_and_width(
+            return arith.ConstantOp.from_int_and_width(
                 expr.value, 32).result
-        
+
         elif isinstance(expr, BinaryOp):
             left = self.compile(expr.left)
             right = self.compile(expr.right)
-            
+
             if expr.op == '+':
-                return arith.Addi(left, right).result
+                return arith.AddiOp(left, right).result
             elif expr.op == '*':
-                return arith.Muli(left, right).result
+                return arith.MuliOp(left, right).result
             # ... other operations
 
 # Optimizer
-def optimize(module: builtin.ModuleOp):
+def optimize(module: ModuleOp):
     """Apply optimization passes"""
     passes = [
         ConstantFolding(),
         CommonSubexpressionElimination(),
         DeadCodeElimination(),
     ]
-    
+
     for pass_instance in passes:
         pass_instance.apply(module)
 
@@ -848,21 +947,21 @@ def optimize(module: builtin.ModuleOp):
 def compile_expression(text: str):
     # Parse
     ast = parse(text)
-    
+
     # Generate IR
     ir_gen = ExprIRGen()
     result = ir_gen.compile(ast)
-    
+
     # Wrap in module
-    module = builtin.ModuleOp([
-        func.FuncOp("compute", 
-                   func.FunctionType.from_lists([], [builtin.i32]),
-                   body=[func.Return(result)])
+    module = ModuleOp([
+        func.FuncOp("compute",
+                    FunctionType.from_lists([], [i32]),
+                    body=[func.ReturnOp(result)])
     ])
-    
+
     # Optimize
     optimize(module)
-    
+
     return module
 \end{lstlisting}
 
@@ -871,40 +970,42 @@ def compile_expression(text: str):
 Let's create an optimization for neural network operations:
 
 \begin{lstlisting}[language=Python, caption=Neural Network Optimization]
-class FuseBatchNormIntoConv(Pass):
+class FuseBatchNormIntoConv(ModulePass):
     """Fuse batch normalization into preceding convolution"""
-    
-    def apply(self, module: builtin.ModuleOp) -> None:
+
+    name = "fuse-bn-conv"
+
+    def apply(self, ctx, module):
         for conv in module.walk():
             if isinstance(conv, nn.Conv2d):
                 # Look for batch norm following conv
                 for use in conv.result.uses:
                     if isinstance(use.operation, nn.BatchNorm2d):
                         self.fuse(conv, use.operation)
-    
-    def fuse(self, conv: nn.Conv2d, bn: nn.BatchNorm2d):
+
+    def fuse(self, conv, bn):
         """Fuse batch norm parameters into convolution"""
         # Extract batch norm parameters
-        gamma = bn.gamma  # scale
-        beta = bn.beta    # shift
+        gamma = bn.gamma          # scale
+        beta = bn.beta            # shift
         mean = bn.running_mean
         var = bn.running_var
         eps = bn.eps
-        
+
         # Compute fused weights and bias
         std = sqrt(var + eps)
         fused_weight = conv.weight * (gamma / std)
         fused_bias = gamma * (conv.bias - mean) / std + beta
-        
+
         # Create new convolution with fused parameters
         fused_conv = nn.Conv2d(
             weight=fused_weight,
             bias=fused_bias,
             # ... other conv parameters
         )
-        
+
         # Replace conv -> bn with fused conv
-        bn.result.replace_by(fused_conv.result)
+        bn.result.replace_all_uses_with(fused_conv.result)
         conv.erase()
         bn.erase()
 \end{lstlisting}
@@ -914,57 +1015,64 @@ class FuseBatchNormIntoConv(Pass):
 Let's create a compiler for a subset of ML operations:
 
 \begin{lstlisting}[language=Python, caption=Mini ML Compiler]
-# Define ML dialect
-@dialect_def
-class MLDialect(Dialect):
-    name = "ml"
+# Illustrative: defines an invented `ml` dialect to sketch fusion + lowering.
+from xdsl.ir import Dialect
+from xdsl.irdl import irdl_op_definition, IRDLOperation, operand_def, result_def
+from xdsl.dialects.builtin import TensorType
+from xdsl.pattern_rewriter import (
+    RewritePattern, PatternRewriter, op_type_rewrite_pattern,
+)
 
-@op_def
+@irdl_op_definition
 class LinearOp(IRDLOperation):
     """Linear layer: y = Wx + b"""
     name = "ml.linear"
-    
+
     input = operand_def(TensorType)
-    weight = operand_def(TensorType)  
+    weight = operand_def(TensorType)
     bias = operand_def(TensorType)
-    
+
     output = result_def(TensorType)
 
-@op_def
+@irdl_op_definition
 class ReluOp(IRDLOperation):
     """ReLU activation"""
     name = "ml.relu"
-    
+
     input = operand_def(TensorType)
     output = result_def(TensorType)
+
+MLDialect = Dialect("ml", [LinearOp, ReluOp])
 
 # Optimization: Fuse Linear + ReLU
 class FuseLinearRelu(RewritePattern):
     @op_type_rewrite_pattern
-    def match_and_rewrite(self, relu: ReluOp, 
-                         rewriter: PatternRewriter):
-        # Check if input is from linear
+    def match_and_rewrite(self, relu: ReluOp,
+                          rewriter: PatternRewriter):
+        # Check if input is from a linear layer
         if isinstance(relu.input.owner, LinearOp):
             linear = relu.input.owner
-            
+
             # Create fused operation
             fused = LinearReluOp(
-                linear.input, 
+                linear.input,
                 linear.weight,
-                linear.bias
+                linear.bias,
             )
-            
-            # Replace both ops with fused version
-            rewriter.replace_op(relu, [fused.output])
-            rewriter.erase_op(linear)
+
+            # Replace both ops with the fused version
+            rewriter.replace_all_uses_with(relu.output, fused.output)
+            rewriter.erase(linear)
 
 # Lower to hardware operations
-class LowerMLToHardware(Pass):
+class LowerMLToHardware(ModulePass):
     """Lower ML ops to target hardware"""
-    
-    def apply(self, module: builtin.ModuleOp):
+
+    name = "lower-ml"
+
+    def apply(self, ctx, module):
         target = self.get_target()  # CPU, GPU, TPU, etc.
-        
+
         for op in module.walk():
             if isinstance(op, LinearOp):
                 if target == "gpu":
@@ -1011,39 +1119,41 @@ Choosing the best optimization requires understanding costs:
 \begin{lstlisting}[language=Python, caption=Cost-Based Optimization]
 class CostModel:
     """Estimate operation costs"""
-    
-    def estimate_cost(self, op: Operation) -> float:
-        if isinstance(op, arith.Mulf):
+
+    def estimate_cost(self, op) -> float:
+        if isinstance(op, arith.MulfOp):
             return 1.0  # FP multiply cost
-        elif isinstance(op, memref.Load):
+        elif isinstance(op, memref.LoadOp):
             return self.memory_latency(op)
-        elif isinstance(op, scf.For):
+        elif isinstance(op, scf.ForOp):
             iterations = self.analyze_trip_count(op)
-            body_cost = sum(self.estimate_cost(body_op) 
-                          for body_op in op.body.walk())
+            body_cost = sum(self.estimate_cost(body_op)
+                            for body_op in op.body.walk())
             return iterations * body_cost
 
-class AutotuningPass(Pass):
+class AutotuningPass(ModulePass):
     """Try different optimization strategies"""
-    
-    def apply(self, module: builtin.ModuleOp):
+
+    name = "autotune"
+
+    def apply(self, ctx, module):
         strategies = [
             self.try_vectorization,
             self.try_loop_tiling,
             self.try_parallelization,
         ]
-        
+
         best_module = module
         best_cost = self.cost_model.estimate_cost(module)
-        
+
         for strategy in strategies:
             candidate = strategy(module.clone())
             cost = self.cost_model.estimate_cost(candidate)
-            
+
             if cost < best_cost:
                 best_module = candidate
                 best_cost = cost
-        
+
         return best_module
 \end{lstlisting}
 
@@ -1097,9 +1207,9 @@ Memory operations are often bottlenecks in program performance. When a program s
 \end{itemize}
 
 \begin{lstlisting}[language=Python, caption=Exercise: Store-Load Forwarding]
-class StoreLoadForwarding(Pass):
+class StoreLoadForwarding(ModulePass):
     """Forward stored values to subsequent loads
-    
+
     Transform patterns like:
         memref.store %value, %mem[%i, %j]
         %loaded = memref.load %mem[%i, %j]
@@ -1107,15 +1217,19 @@ class StoreLoadForwarding(Pass):
         memref.store %value, %mem[%i, %j]
         // Use %value directly instead of %loaded
     """
-    
-    def apply(self, module: builtin.ModuleOp):
+
+    name = "store-load-forward"
+
+    def apply(self, ctx: Context, module: builtin.ModuleOp) -> None:
         # TODO: Your implementation here
         # Step 1: Build a map of recent stores for each memory location
         # Step 2: For each load, check if we have a recent store
         # Step 3: Verify indices match exactly (be conservative!)
         # Step 4: Check for intervening operations that might invalidate
-        # Step 5: Replace load result with stored value
-        
+        # Step 5: Replace load result with stored value:
+        #     load.res.replace_all_uses_with(stored_value)
+        #     load.detach(); load.erase()
+
         # Hints:
         # - Start simple: handle only same-block forwarding
         # - Be conservative: only forward when indices are identical
@@ -1169,35 +1283,38 @@ Quantum computing represents a fundamentally different computational model. By c
 \end{itemize}
 
 \begin{lstlisting}[language=Python, caption=Exercise: Quantum Dialect]
-from xdsl.irdl import irdl_op_definition, irdl_attr_definition
-from xdsl.ir import OpResult, SSAValue
-
-@dialect_def
-class QuantumDialect(Dialect):
-    name = "quantum"
+from xdsl.ir import Dialect, SSAValue, TypeAttribute, ParametrizedAttribute
+from xdsl.irdl import (irdl_op_definition, irdl_attr_definition,
+                       IRDLOperation, operand_def, result_def, traits_def)
+from xdsl.traits import Pure
+from xdsl.dialects.builtin import IntegerType
 
 # TODO: Define quantum-specific types
 @irdl_attr_definition
-class QubitType(TypeAttribute):
+class QubitType(ParametrizedAttribute, TypeAttribute):
     """Type representing a quantum bit"""
     name = "quantum.qubit"
 
-@irdl_attr_definition  
-class QuantumRegisterType(TypeAttribute):
+@irdl_attr_definition
+class QuantumRegisterType(ParametrizedAttribute, TypeAttribute):
     """Type for quantum register of n qubits"""
     name = "quantum.qreg"
-    size: int
+    size: IntAttr
 
 # TODO: Define quantum gates
 @irdl_op_definition
 class HadamardOp(IRDLOperation):
     """Hadamard gate: creates superposition"""
     name = "quantum.h"
-    
-    input_qubit = operand_def(QubitType)
-    output_qubit = result_def(QubitType)
-    
-    def verify(self):
+
+    input = operand_def(QubitType)
+    result = result_def(QubitType)
+    traits = traits_def(Pure())   # no side effects => DCE may remove it
+
+    def __init__(self, inp: SSAValue):
+        super().__init__(operands=[inp], result_types=[QubitType()])
+
+    def verify_(self):
         """Verify operation is well-formed"""
         # Hadamard is always valid on a single qubit
         pass
@@ -1206,10 +1323,10 @@ class HadamardOp(IRDLOperation):
 class CNOTOp(IRDLOperation):
     """Controlled-NOT gate"""
     name = "quantum.cnot"
-    
+
     control = operand_def(QubitType)
     target = operand_def(QubitType)
-    
+
     # CNOT modifies both qubits
     new_control = result_def(QubitType)
     new_target = result_def(QubitType)
@@ -1218,18 +1335,26 @@ class CNOTOp(IRDLOperation):
 class MeasureOp(IRDLOperation):
     """Measure qubit, collapsing to classical bit"""
     name = "quantum.measure"
-    
+
     qubit = operand_def(QubitType)
     classical_bit = result_def(IntegerType(1))
 
+QuantumDialect = Dialect("quantum",
+                         [HadamardOp, CNOTOp, MeasureOp],
+                         [QubitType, QuantumRegisterType])
+
 # TODO: Optimization passes
-class QuantumCircuitOptimizer(Pass):
+class QuantumCircuitOptimizer(ModulePass):
     """Optimize quantum circuits"""
-    
-    def apply(self, module: builtin.ModuleOp):
+
+    name = "quantum-opt"
+
+    def apply(self, ctx, module):
         # TODO: Implement optimizations like:
-        # - Gate cancellation (H·H = I)
-        # - Gate commutation 
+        # - Gate cancellation (H H = I): match a HadamardOp whose input is
+        #   another HadamardOp, replace its result's uses with the inner
+        #   input, and erase it.
+        # - Gate commutation
         # - Circuit depth reduction
         pass
 \end{lstlisting}
@@ -1259,29 +1384,31 @@ Modern processors have SIMD (Single Instruction, Multiple Data) units that can p
 \end{itemize}
 
 \begin{lstlisting}[language=Python, caption=Exercise: Auto-Vectorization]
-class Vectorization(Pass):
+class Vectorization(ModulePass):
     """Automatically vectorize loops
-    
+
     Transform:
         for i in range(n):
             c[i] = a[i] + b[i]
-    
+
     Into:
         for i in range(0, n-4, 4):
             c[i:i+4] = a[i:i+4] + b[i:i+4]  # Vector operation
         for i in range(n-n%4, n):
-            c[i] = a[i] + b[i]  # Scalar remainder
+            c[i] = a[i] + b[i]              # Scalar remainder
     """
-    
+
+    name = "vectorize"
+
     def __init__(self, vector_width=4):
         self.vector_width = vector_width
-    
-    def apply(self, module: builtin.ModuleOp):
+
+    def apply(self, ctx: Context, module: builtin.ModuleOp) -> None:
         for loop in self.find_loops(module):
             if self.is_vectorizable(loop):
                 self.vectorize_loop(loop)
-    
-    def is_vectorizable(self, loop: scf.For) -> bool:
+
+    def is_vectorizable(self, loop: scf.ForOp) -> bool:
         """Check if loop can be vectorized"""
         # TODO: Check for:
         # 1. No loop-carried dependencies
@@ -1289,8 +1416,8 @@ class Vectorization(Pass):
         # 3. Supported operations (add, mul, etc.)
         # 4. No control flow in loop body
         pass
-    
-    def vectorize_loop(self, loop: scf.For):
+
+    def vectorize_loop(self, loop: scf.ForOp):
         """Transform loop to use vector operations"""
         # TODO: Implementation steps:
         # 1. Create vector loop with stride = vector_width
@@ -1298,8 +1425,8 @@ class Vectorization(Pass):
         # 3. Create remainder loop for n % vector_width iterations
         # 4. Update memory operations to vector loads/stores
         pass
-    
-    def analyze_dependencies(self, loop: scf.For) -> bool:
+
+    def analyze_dependencies(self, loop: scf.ForOp) -> bool:
         """Check for loop-carried dependencies"""
         # TODO: Implement dependency analysis
         # Look for patterns like a[i] = a[i-1] + b[i]
@@ -1487,30 +1614,34 @@ def optimize_nn_for_deployment(model: NeuralNetwork):
 Build a compiler for financial computations:
 
 \begin{lstlisting}[language=Python, caption=Financial DSL Compiler]
-# Define financial operations dialect
-@dialect_def
-class FinanceDialect(Dialect):
-    name = "finance"
-    
-    @op_def
-    class BlackScholesOp(IRDLOperation):
-        """Black-Scholes option pricing"""
-        name = "finance.black_scholes"
-        
-        spot = operand_def(f64)
-        strike = operand_def(f64)
-        time = operand_def(f64)
-        rate = operand_def(f64)
-        volatility = operand_def(f64)
-        
-        call_price = result_def(f64)
-        put_price = result_def(f64)
+# Illustrative: invented `finance` dialect.
+from xdsl.ir import Dialect
+from xdsl.irdl import irdl_op_definition, IRDLOperation, operand_def, result_def
+from xdsl.dialects.builtin import f64
+
+@irdl_op_definition
+class BlackScholesOp(IRDLOperation):
+    """Black-Scholes option pricing"""
+    name = "finance.black_scholes"
+
+    spot = operand_def(f64)
+    strike = operand_def(f64)
+    time = operand_def(f64)
+    rate = operand_def(f64)
+    volatility = operand_def(f64)
+
+    call_price = result_def(f64)
+    put_price = result_def(f64)
+
+FinanceDialect = Dialect("finance", [BlackScholesOp])
 
 # Optimize for numerical stability
-class NumericalStabilityPass(Pass):
+class NumericalStabilityPass(ModulePass):
     """Ensure numerical stability in financial calculations"""
-    
-    def apply(self, module: builtin.ModuleOp):
+
+    name = "numerical-stability"
+
+    def apply(self, ctx, module):
         for op in module.walk():
             if isinstance(op, math.ExpOp):
                 # Prevent overflow/underflow
@@ -1525,33 +1656,39 @@ class NumericalStabilityPass(Pass):
 Compile programs for distributed execution:
 
 \begin{lstlisting}[language=Python, caption=Distributed Computing Compiler]
-@dialect_def
-class DistributedDialect(Dialect):
-    name = "dist"
-    
-    @op_def
-    class AllReduceOp(IRDLOperation):
-        """All-reduce across distributed nodes"""
-        name = "dist.allreduce"
-        
-        input = operand_def(TensorType)
-        output = result_def(TensorType)
-        reduction = attr_def(str)  # "sum", "max", etc.
+# Illustrative: invented `dist` dialect.
+from xdsl.ir import Dialect
+from xdsl.irdl import (irdl_op_definition, IRDLOperation,
+                       operand_def, result_def, attr_def)
+from xdsl.dialects.builtin import TensorType, StringAttr
 
-class DistributionPass(Pass):
+@irdl_op_definition
+class AllReduceOp(IRDLOperation):
+    """All-reduce across distributed nodes"""
+    name = "dist.allreduce"
+
+    input = operand_def(TensorType)
+    output = result_def(TensorType)
+    reduction = attr_def(StringAttr)  # "sum", "max", etc.
+
+DistributedDialect = Dialect("dist", [AllReduceOp])
+
+class DistributionPass(ModulePass):
     """Distribute computation across nodes"""
-    
-    def apply(self, module: builtin.ModuleOp):
+
+    name = "distribute"
+
+    def apply(self, ctx, module):
         # Analyze data dependencies
         deps = self.analyze_dependencies(module)
-        
+
         # Partition computation
         partitions = self.partition_computation(module, deps)
-        
+
         # Insert communication operations
         for partition in partitions:
             self.insert_communication_ops(partition)
-        
+
         # Generate distributed code
         return self.generate_distributed_code(partitions)
 \end{lstlisting}
@@ -1683,56 +1820,40 @@ A dialect in xDSL/MLIR is a collection of operations and types that represent co
 \textbf{Core Operations in the Matrix Dialect:}
 
 \begin{lstlisting}[language=Python, caption=Key dialect operations and their design]
-from xdsl.irdl import IRDLOperation, irdl_op_definition
-from xdsl.ir import Dialect
+from xdsl.ir import Dialect, SSAValue
+from xdsl.irdl import (irdl_op_definition, IRDLOperation,
+                       operand_def, result_def, traits_def)
+from xdsl.traits import Pure
+from xdsl.dialects.builtin import TensorType
+from xdsl.utils.exceptions import VerifyException
 
 @irdl_op_definition
 class MatMulOp(IRDLOperation):
     """Matrix multiplication: C = A @ B"""
     name = "matrix.matmul"
-    
-    # Shape inference: (m×n) @ (n×p) → (m×p)
-    def verify(self):
+
+    lhs = operand_def(TensorType)
+    rhs = operand_def(TensorType)
+    result = result_def(TensorType)
+
+    # Shape inference: (m x n) @ (n x p) -> (m x p)
+    def verify_(self):
         # Check dimension compatibility
-        assert self.lhs.type.cols == self.rhs.type.rows
+        if self.lhs.type.get_shape()[-1] != self.rhs.type.get_shape()[0]:
+            raise VerifyException("incompatible matmul dimensions")
 
 @irdl_op_definition
 class TransposeOp(IRDLOperation):
     """Matrix transpose: B = A^T"""
     name = "matrix.transpose"
-    
-    # Shape transformation: (m×n) → (n×m)
+
+    input = operand_def(TensorType)
+    result = result_def(TensorType)
+    traits = traits_def(Pure())   # pure => DCE may remove dead transposes
+
+    # Shape transformation: (m x n) -> (n x m)
     # Key for optimization patterns
-
-@irdl_op_definition
-class ScalarMulOp(IRDLOperation):
-    """Element-wise scalar multiplication: B = α·A"""
-    name = "matrix.scalar_mul"
-    
-    # Preserves shape, scales values
-
-@irdl_op_definition
-class AddOp(IRDLOperation):
-    """Element-wise addition: C = A + B"""
-    name = "matrix.add"
-    
-    # Requires matching dimensions
-\end{lstlisting}
-
-\textbf{Design Decisions:}
-\begin{enumerate}
-    \item \textbf{Type System}: Use static shapes when known for better optimization
-    \item \textbf{Verification}: Each operation includes dimension checking
-    \item \textbf{SSA Form}: Operations produce new values (functional style)
-    \item \textbf{Attributes vs Operands}: Constants as attributes, variables as operands
-\end{enumerate}
-
-\subsection{Phase 4: IR Generation}
-
-The IR generator transforms the parsed operations into the matrix dialect IR. This phase bridges the gap between the source language (Python) and our optimization framework.
-
-\textbf{IR Generation Process:}
-\begin{enumerate}
+    def __init__(self, inp:x
     \item Create a function wrapper for the operations
     \item Map Python variables to SSA values
     \item Generate dialect operations in sequence
@@ -1744,11 +1865,11 @@ The IR generator transforms the parsed operations into the matrix dialect IR. Th
 class MatrixIRGenerator:
     def __init__(self):
         self.var_map = {}  # Maps Python variables to SSA values
-    
+
     def generate_operation(self, op_info):
         op_type = op_info['operation']['op']
         target = op_info['target']
-        
+
         if op_type == 'matmul':
             # C = A @ B becomes:
             # %c = matrix.matmul %a, %b : (f32, f32) -> f32
@@ -1756,11 +1877,11 @@ class MatrixIRGenerator:
             right = self.var_map[op_info['operation']['right']]
             result = MatMulOp(left, right).result
             self.var_map[target] = result
-        
+
         elif op_type == 'double_transpose':
             # D = C.T.T becomes (before optimization):
-            # %tmp = matrix.transpose %c : (m×n) -> (n×m)
-            # %d = matrix.transpose %tmp : (n×m) -> (m×n)
+            # %tmp = matrix.transpose %c : (m x n) -> (n x m)
+            # %d = matrix.transpose %tmp : (n x m) -> (m x n)
             matrix = self.var_map[op_info['operation']['matrix']]
             temp = TransposeOp(matrix).result
             result = TransposeOp(temp).result
@@ -1793,20 +1914,26 @@ The optimization phase applies pattern-based transformations to improve the IR. 
 
 \textbf{Pattern Matching Approach:}
 \begin{lstlisting}[language=Python, caption=Pattern-based optimization using xDSL's rewriter]
-from xdsl.pattern_rewriter import PatternRewriter, RewritePattern
+from xdsl.pattern_rewriter import (
+    PatternRewriter, RewritePattern, op_type_rewrite_pattern,
+)
 
 class DoubleTransposeElimination(RewritePattern):
     """Eliminate pattern: transpose(transpose(X)) = X"""
-    
-    def match_and_rewrite(self, op: TransposeOp, rewriter):
+
+    eliminated_count = 0
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: TransposeOp, rewriter: PatternRewriter):
         # Check if input is also a transpose
         if isinstance(op.input.owner, TransposeOp):
             # Found the pattern!
             original = op.input.owner.input
-            
-            # Replace double transpose with original value
-            rewriter.replace_op(op, [original])
-            
+
+            # Replace double transpose with the original value
+            rewriter.replace_all_uses_with(op.result, original)
+            rewriter.erase(op)
+
             # Statistics tracking
             self.eliminated_count += 1
 \end{lstlisting}
@@ -1847,21 +1974,21 @@ class MatrixCompiler:
     def compile(self, source_code: str) -> str:
         # Phase 1: Parse Python to AST
         ast_tree = ast.parse(source_code)
-        
+
         # Phase 2: Extract matrix operations
         operations = MatrixOperationExtractor().extract(ast_tree)
-        
+
         # Phase 3: Generate IR
         module = MatrixIRGenerator().generate(operations)
-        
+
         # Phase 4: Optimize
         optimizer = MatrixOptimizationPipeline()
         optimizer.apply(module)
-        
+
         # Phase 5: Lower to target (optional)
         # Could lower to LLVM, C, or other targets
-        
-        return module.to_string()
+
+        return str(module)
 \end{lstlisting}
 
 \textbf{Running the Compiler:}
@@ -1935,25 +2062,25 @@ But, we have not added tests yet... :)
 \textbf{Project Structure:}
 \begin{lstlisting}[language=bash, caption=Recommended project organization]
 matrix-compiler/
-├── src/
-│   ├── frontend/
-│   │   ├── parser.py         # AST parsing
-│   │   └── lexer.py          # Tokenization (if needed)
-│   ├── dialect/
-│   │   ├── matrix_ops.py     # Operation definitions
-│   │   └── types.py          # Type definitions
-│   ├── transforms/
-│   │   ├── optimize.py       # Optimization passes
-│   │   └── lower.py          # Lowering passes
-│   └── compiler.py           # Main driver
-├── tests/
-│   ├── test_parser.py        # Parser tests
-│   ├── test_dialect.py       # Dialect tests
-│   └── test_optimize.py      # Optimization tests
-├── examples/
-│   ├── simple.py             # Simple examples
-│   └── complex.py            # Complex examples
-└── README.md                 # Documentation
+|-- src/
+|   |-- frontend/
+|   |   |--- parser.py         # AST parsing
+|   |   |-- lexer.py          # Tokenization (if needed)
+|   |-- dialect/
+|   |   |-- matrix_ops.py     # Operation definitions
+|   |   |-- types.py          # Type definitions
+|   |-- transforms/
+|   |   |-- optimize.py       # Optimization passes
+|   |   |-- lower.py          # Lowering passes
+|   |-- compiler.py           # Main driver
+|-- tests/
+|   |-- test_parser.py        # Parser tests
+|   |-- test_dialect.py       # Dialect tests
+|   |-- test_optimize.py      # Optimization tests
+|-- examples/
+|   |-- simple.py             # Simple examples
+|   |-- complex.py            # Complex examples
+|-- README.md                 # Documentation
 \end{lstlisting}
 
 \subsection{Learning Outcomes and Key Takeaways}
